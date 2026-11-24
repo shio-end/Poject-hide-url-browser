@@ -54,6 +54,7 @@ public class MainActivity extends Activity {
     private static final String[] FONT_NAMES = {"ค่าเริ่มต้น", "Serif", "Monospace"};
     private static final String[] FONT_FAMILIES = {"sans-serif", "serif", "monospace"};
     private static final int WALLPAPER_REQUEST = 1;
+    private static final int THEME_PHOTO_REQUEST = 2;
 
     private UpdateChecker updates;
     private MusicPanel music;
@@ -500,6 +501,11 @@ public class MainActivity extends Activity {
                 final int mode = start + col;
                 boolean selected = mode == sheet.theme.mode;
                 TextView tile = sheet.action((selected ? "✓  " : "") + Appearance.MODES[mode], () -> {
+                    if (mode == Appearance.WALLPAPER && !settings.contains("wallpaper")) {
+                        sheet.dialog.dismiss();
+                        pickWallpaper(THEME_PHOTO_REQUEST);
+                        return;
+                    }
                     settings.edit().putInt("themeMode", mode).apply();
                     applyHomeTheme();
                     sheet.dialog.dismiss();
@@ -525,12 +531,8 @@ public class MainActivity extends Activity {
         int preset = settings.getInt("palette", 0);
         choice(sheet, "พื้นหลัง", backgrounds, settings.contains("wallpaper") ? 3 : preset, i -> {
             if (i == 3) {
-                Intent picker = new Intent(Intent.ACTION_OPEN_DOCUMENT);
-                picker.addCategory(Intent.CATEGORY_OPENABLE);
-                picker.setType("image/*");
-                choosingWallpaper = true;
                 sheet.dialog.dismiss();
-                startActivityForResult(picker, WALLPAPER_REQUEST);
+                pickWallpaper(WALLPAPER_REQUEST);
             } else {
                 releaseWallpaper(settings.getString("wallpaper", ""));
                 settings.edit().remove("wallpaper").putInt("palette", i).apply();
@@ -613,6 +615,14 @@ public class MainActivity extends Activity {
         sheet.row(group);
     }
 
+    private void pickWallpaper(int request) {
+        Intent picker = new Intent(Intent.ACTION_OPEN_DOCUMENT);
+        picker.addCategory(Intent.CATEGORY_OPENABLE);
+        picker.setType("image/*");
+        choosingWallpaper = true;
+        startActivityForResult(picker, request);
+    }
+
     private void applyZoom() {
         int[] sizes = {85, 100, 115, 130, 150};
         web.getSettings().setTextZoom(sizes[settings.getInt("zoomStep", 1)]);
@@ -628,7 +638,7 @@ public class MainActivity extends Activity {
     protected void onActivityResult(int request, int result, Intent data) {
         super.onActivityResult(request, result, data);
         if (updates.handleResult(request, result)) return;
-        if (request != WALLPAPER_REQUEST) return;
+        if (request != WALLPAPER_REQUEST && request != THEME_PHOTO_REQUEST) return;
         choosingWallpaper = false;
         if (result != RESULT_OK || data == null || data.getData() == null) return;
         Uri image = data.getData();
@@ -638,7 +648,9 @@ public class MainActivity extends Activity {
             android.graphics.drawable.Drawable drawable = decodeWallpaper(image);
             int color = android.app.WallpaperColors.fromDrawable(drawable).getPrimaryColor().toArgb();
             wallpaper.setImageDrawable(drawable);
-            settings.edit().putString("wallpaper", image.toString()).putInt("wallColor", color).apply();
+            SharedPreferences.Editor edit = settings.edit().putString("wallpaper", image.toString()).putInt("wallColor", color);
+            if (request == THEME_PHOTO_REQUEST) edit.putInt("themeMode", Appearance.WALLPAPER);
+            edit.apply();
             applyHomeTheme();
             if (!previous.equals(image.toString())) releaseWallpaper(previous);
         } catch (java.io.IOException | SecurityException | IllegalArgumentException error) {

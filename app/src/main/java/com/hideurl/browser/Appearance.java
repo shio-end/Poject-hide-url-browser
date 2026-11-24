@@ -7,16 +7,15 @@ import android.graphics.Color;
 
 final class Appearance {
     static final int SYSTEM = 0, LIGHT = 1, DARK = 2, WALLPAPER = 3;
-    static final String[] MODES = {"ตามระบบ", "สว่าง", "มืด", "สีตามพื้นหลัง"};
+    static final String[] MODES = {"ตามระบบ", "สว่าง", "มืด", "สีจากรูปพื้นหลัง"};
     final int mode, paper, surface, ink, muted, line, accent;
     final boolean dark;
 
     Appearance(Context context) {
         SharedPreferences p = context.getSharedPreferences("browser", Context.MODE_PRIVATE);
-        mode = p.getInt("themeMode", SYSTEM);
-        int[] presets = {0xffc5ab89, 0xff84b1b1, 0xff686183};
-        int seed = p.contains("wallpaper") ? p.getInt("wallColor", 0xff999999)
-                : presets[p.getInt("palette", 0)];
+        int preferred = p.getInt("themeMode", SYSTEM);
+        mode = preferred == WALLPAPER && !p.contains("wallpaper") ? SYSTEM : preferred;
+        int seed = p.getInt("wallColor", Color.GRAY);
         boolean systemDark = (context.getResources().getConfiguration().uiMode &
                 Configuration.UI_MODE_NIGHT_MASK) == Configuration.UI_MODE_NIGHT_YES;
         dark = mode == DARK || (mode == SYSTEM && systemDark) ||
