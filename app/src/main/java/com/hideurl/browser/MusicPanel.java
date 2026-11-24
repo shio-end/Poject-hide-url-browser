@@ -107,12 +107,29 @@ final class MusicPanel {
         backdrop(false);
     }
 
+    private ImageButton previewHeart;
+
+    void applyAppearance(Appearance theme) {
+        if (previewHeart == null) return;
+        previewHeart.setColorFilter(theme.accent);
+        previewHeart.setBackground(theme.buttonFace(activity.getResources().getDisplayMetrics().density));
+        ((GradientDrawable) card.getBackground()).setColor(theme.surface);
+    }
+
+    private void revealCard() {
+        if (!android.animation.ValueAnimator.areAnimatorsEnabled()) return;
+        card.setAlpha(0f);
+        card.setTranslationY(dp(10));
+        card.animate().alpha(1f).translationY(0f).setDuration(180).start();
+    }
+
     void preview() {
         Service service = selected;
         if (service == null) return;
         if (current == service) {
             panel.setVisibility(View.VISIBLE);
             panel.bringToFront();
+            revealCard();
             backdrop(true);
             return;
         }
@@ -192,12 +209,10 @@ final class MusicPanel {
         });
         card.addView(player, new FrameLayout.LayoutParams(-1, -1));
         ImageButton heart = new ImageButton(activity);
-        GradientDrawable circle = new GradientDrawable();
-        circle.setShape(GradientDrawable.OVAL);
-        circle.setColor(Color.BLACK);
+        previewHeart = heart;
         heart.setImageResource(R.drawable.ic_music_heart);
-        heart.setBackground(new android.graphics.drawable.RippleDrawable(
-                android.content.res.ColorStateList.valueOf(0x55ffffff), circle, null));
+        applyAppearance(new Appearance(activity));
+        heart.setStateListAnimator(android.animation.AnimatorInflater.loadStateListAnimator(activity, R.animator.button_press));
         heart.setPadding(dp(8), dp(8), dp(8), dp(8));
         heart.setContentDescription("ย่อพรีวิวเพลง");
         TapSound.bind(heart, this::minimize);
@@ -206,6 +221,7 @@ final class MusicPanel {
         card.addView(heart, corner);
         root.addView(panel, new FrameLayout.LayoutParams(-1, -1));
         backdrop(true);
+        revealCard();
         player.loadUrl(service.homepage().toString());
     }
 
@@ -254,6 +270,7 @@ final class MusicPanel {
         backdrop(false);
         root.removeView(panel);
         card.removeView(player);
+        previewHeart = null;
         card = null;
         player.destroy();
         player = null;

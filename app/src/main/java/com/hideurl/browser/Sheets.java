@@ -92,6 +92,7 @@ final class Sheets {
     void clickable(View view, Runnable click) {
         view.setBackground(new RippleDrawable(ColorStateList.valueOf(0x40888888),
                 surface(theme.surface, 14), null));
+        view.setStateListAnimator(android.animation.AnimatorInflater.loadStateListAnimator(activity, R.animator.button_press));
         view.setFocusable(true);
         TapSound.bind(view, click);
     }

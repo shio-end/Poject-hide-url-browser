@@ -51,6 +51,10 @@ import org.json.JSONException;
 
 public class MainActivity extends Activity {
     private LinearLayout controls;
+    private Appearance palette;
+    private final ArrayList<View> themedButtons = new ArrayList<>();
+    private LinearLayout arrows;
+    private View divider;
     private static final String[] FONT_NAMES = {"ค่าเริ่มต้น", "Serif", "Monospace"};
     private static final String[] FONT_FAMILIES = {"sans-serif", "serif", "monospace"};
     private static final int WALLPAPER_REQUEST = 1;
@@ -147,10 +151,8 @@ public class MainActivity extends Activity {
         urlInput.setImeOptions(EditorInfo.IME_ACTION_GO);
         urlInput.setTextSize(22);
         urlInput.setHint("Url..");
-        urlInput.setHintTextColor(0xffe6e6e6);
-        urlInput.setTextColor(Color.WHITE);
+        styleInput();
         urlInput.setPadding(dp(18), 0, dp(18), 0);
-        urlInput.setBackground(rounded(Color.BLACK, 23));
         controls.addView(urlInput, new LinearLayout.LayoutParams(-1, dp(66)));
         urlInput.setOnEditorActionListener((view, action, event) -> {
             if (action != EditorInfo.IME_ACTION_GO) return false;
@@ -165,7 +167,7 @@ public class MainActivity extends Activity {
 
         saveButton = new TextView(this);
         saveButton.setText("SAVE");
-        saveButton.setTextColor(Color.WHITE);
+        saveButton.setTextColor(palette.accent);
         saveButton.setTextSize(18);
         saveButton.setGravity(Gravity.CENTER);
         styleButton(saveButton);
@@ -267,9 +269,9 @@ public class MainActivity extends Activity {
             return true;
         });
 
-        LinearLayout arrows = new LinearLayout(this);
+        arrows = new LinearLayout(this);
         arrows.setGravity(Gravity.CENTER_VERTICAL);
-        arrows.setBackground(rounded(Color.BLACK, 24));
+        arrows.setBackground(rounded(palette.surface, 24));
         LinearLayout.LayoutParams arrowsPlacement = new LinearLayout.LayoutParams(-2, dp(48));
         arrowsPlacement.leftMargin = dp(4);
         browserBar.addView(arrows, arrowsPlacement);
@@ -279,8 +281,8 @@ public class MainActivity extends Activity {
                 web.goBack();
             }
         });
-        View divider = new View(this);
-        divider.setBackground(rounded(Color.WHITE, 1));
+        divider = new View(this);
+        divider.setBackground(rounded(palette.line, 1));
         arrows.addView(divider, new LinearLayout.LayoutParams(dp(2), dp(23)));
         forward = addIcon(arrows, "forward", "ไปข้างหน้า", 48, 0, () -> {
             if (web.canGoForward()) {
@@ -309,6 +311,10 @@ public class MainActivity extends Activity {
         if (browsing) {
             getSystemService(InputMethodManager.class).hideSoftInputFromWindow(urlInput.getWindowToken(), 0);
             urlInput.clearFocus();
+        }
+        if (!browsing && home.getVisibility() != View.VISIBLE && ValueAnimator.areAnimatorsEnabled()) {
+            controls.setAlpha(0f);
+            controls.animate().alpha(1f).setDuration(180).start();
         }
         home.setVisibility(browsing ? View.GONE : View.VISIBLE);
         browser.setVisibility(browsing ? View.VISIBLE : View.GONE);
@@ -780,6 +786,16 @@ public class MainActivity extends Activity {
 
     private void applyHomeTheme() {
         Appearance theme = new Appearance(this);
+        palette = theme;
+        for (View button : themedButtons) {
+            button.setBackground(theme.buttonFace(getResources().getDisplayMetrics().density));
+            button.invalidate();
+        }
+        if (arrows != null) arrows.setBackground(rounded(theme.surface, 24));
+        if (divider != null) divider.setBackground(rounded(theme.line, 1));
+        if (urlInput != null) styleInput();
+        if (saveButton != null) saveButton.setTextColor(theme.accent);
+        music.applyAppearance(theme);
         int preset = settings.getInt("palette", 0);
         float contrast = new float[]{.13f, .28f, .42f}[preset];
         int shadow = Appearance.tint(theme.paper, theme.accent, contrast);
@@ -794,6 +810,12 @@ public class MainActivity extends Activity {
             glass.setStroke(dp(1), theme.line);
             controls.setBackground(glass);
         }
+    }
+
+    private void styleInput() {
+        urlInput.setTextColor(palette.ink);
+        urlInput.setHintTextColor(palette.muted);
+        urlInput.setBackground(rounded(palette.surface, 23));
     }
 
     private void applyFont() {
@@ -862,8 +884,8 @@ public class MainActivity extends Activity {
     }
 
     private void styleButton(View button) {
-        button.setBackground(new RippleDrawable(ColorStateList.valueOf(0x55ffffff),
-                rounded(Color.BLACK, 24), null));
+        themedButtons.add(button);
+        button.setBackground(palette.buttonFace(getResources().getDisplayMetrics().density));
         button.setStateListAnimator(AnimatorInflater.loadStateListAnimator(this, R.animator.button_press));
     }
 
@@ -901,10 +923,11 @@ public class MainActivity extends Activity {
             canvas.save();
             canvas.translate((getWidth() - size) / 2f, (getHeight() - size) / 2f);
             canvas.scale(size / 32f, size / 32f);
-            paint.setColor(Color.WHITE);
+            paint.setColor(palette.accent);
             switch (shape) {
                 case "heart":
                     android.graphics.drawable.Drawable heart = getDrawable(R.drawable.ic_music_heart);
+                    heart.mutate().setTint(palette.accent);
                     heart.setBounds(0, 0, 32, 32);
                     heart.draw(canvas);
                     break;
@@ -916,7 +939,7 @@ public class MainActivity extends Activity {
                     break;
                 case "settings":
                     polygon(canvas, 16, 2, 28, 9, 28, 23, 16, 30, 4, 23, 4, 9);
-                    paint.setColor(Color.BLACK);
+                    paint.setColor(palette.surface);
                     polygon(canvas, 16, 12, 20, 14, 20, 18, 16, 20, 12, 18, 12, 14);
                     break;
                 case "music":

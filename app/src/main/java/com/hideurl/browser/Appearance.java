@@ -34,6 +34,16 @@ final class Appearance {
                 Math.round(Color.blue(base)*(1-part)+Color.blue(color)*part));
     }
 
+    android.graphics.drawable.RippleDrawable buttonFace(float density) {
+        android.graphics.drawable.GradientDrawable face = new android.graphics.drawable.GradientDrawable();
+        face.setColor(surface);
+        face.setCornerRadius(24 * density);
+        face.setStroke(Math.max(1, Math.round(density)), line);
+        int ripple = (accent & 0x00ffffff) | 0x44000000;
+        return new android.graphics.drawable.RippleDrawable(
+                android.content.res.ColorStateList.valueOf(ripple), face, null);
+    }
+
     int dialogTheme() {
         return dark ? android.R.style.Theme_Material_Dialog_Alert : android.R.style.Theme_Material_Light_Dialog_Alert;
     }
