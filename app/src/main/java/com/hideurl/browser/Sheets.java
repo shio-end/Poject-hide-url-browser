@@ -21,16 +21,22 @@ final class Sheets {
     final Dialog dialog;
     final LinearLayout body;
     final LinearLayout header;
-    static final int INK = 0xff26231e;
-    static final int MUTED = 0xff635e54;
+    final Appearance theme;
 
     Sheets(Activity activity, String title) {
         this.activity = activity;
-        dialog = new Dialog(activity);
+        theme = new Appearance(activity);
+        dialog = new Dialog(activity, theme.dialogTheme());
         dialog.requestWindowFeature(Window.FEATURE_NO_TITLE);
         LinearLayout card = column();
-        card.setBackground(surface(0xfffaf7ef, 24));
+        card.setBackground(surface(theme.paper, 24));
         card.setPadding(dp(18), dp(14), dp(18), dp(14));
+        View grip = new View(activity);
+        LinearLayout.LayoutParams handle = new LinearLayout.LayoutParams(dp(36), dp(4));
+        handle.gravity = Gravity.CENTER_HORIZONTAL;
+        handle.bottomMargin = dp(12);
+        grip.setBackground(surface(theme.line, 2));
+        card.addView(grip, handle);
         header = new LinearLayout(activity);
         header.setGravity(Gravity.CENTER_VERTICAL);
         TextView heading = label(title, 23, true);
@@ -69,7 +75,7 @@ final class Sheets {
         TextView t = new TextView(activity);
         t.setText(text);
         t.setTextSize(size);
-        t.setTextColor(INK);
+        t.setTextColor(theme.ink);
         if (bold) t.setTypeface(Typeface.DEFAULT, Typeface.BOLD);
         return t;
     }
@@ -84,15 +90,15 @@ final class Sheets {
     }
 
     void clickable(View view, Runnable click) {
-        view.setBackground(new RippleDrawable(ColorStateList.valueOf(0x307c693c),
-                surface(0xfffffdf8, 14), null));
+        view.setBackground(new RippleDrawable(ColorStateList.valueOf(0x40888888),
+                surface(theme.surface, 14), null));
         view.setFocusable(true);
-        view.setOnClickListener(v -> click.run());
+        TapSound.bind(view, click);
     }
 
     void section(String name) {
         TextView title = label(name, 14, true);
-        title.setTextColor(MUTED);
+        title.setTextColor(theme.muted);
         title.setPadding(dp(4), dp(16), 0, dp(6));
         body.addView(title);
     }

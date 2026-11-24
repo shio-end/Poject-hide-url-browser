@@ -50,7 +50,7 @@ import org.json.JSONArray;
 import org.json.JSONException;
 
 public class MainActivity extends Activity {
-    private static final int GOLD = 0xffe6bb65;
+    private LinearLayout controls;
     private static final String[] FONT_NAMES = {"ค่าเริ่มต้น", "Serif", "Monospace"};
     private static final String[] FONT_FAMILIES = {"sans-serif", "serif", "monospace"};
     private static final int WALLPAPER_REQUEST = 1;
@@ -76,6 +76,7 @@ public class MainActivity extends Activity {
     @Override
     public void onCreate(Bundle state) {
         super.onCreate(state);
+        TapSound.prepare(this);
         getSplashScreen().setOnExitAnimationListener(splash -> {
             if (!ValueAnimator.areAnimatorsEnabled()) {
                 splash.remove();
@@ -128,13 +129,9 @@ public class MainActivity extends Activity {
         home.addView(shade, new FrameLayout.LayoutParams(-1, -1));
         applyWallpaper();
 
-        LinearLayout controls = new LinearLayout(this);
+        controls = new LinearLayout(this);
         controls.setOrientation(LinearLayout.VERTICAL);
-        GradientDrawable glass = new GradientDrawable(GradientDrawable.Orientation.TL_BR,
-                new int[]{0x88ffffff, 0x24ffffff, 0x18ffffff, 0x56ffffff});
-        glass.setCornerRadius(dp(32));
-        glass.setStroke(dp(1), 0xaaffffff);
-        controls.setBackground(glass);
+        applyHomeTheme();
         controls.setElevation(dp(4));
         controls.setPadding(dp(14), dp(14), dp(14), dp(14));
         FrameLayout.LayoutParams placement = new FrameLayout.LayoutParams(dp(264), -2, Gravity.CENTER);
@@ -169,7 +166,7 @@ public class MainActivity extends Activity {
         saveButton.setTextSize(18);
         saveButton.setGravity(Gravity.CENTER);
         styleButton(saveButton);
-        saveButton.setOnClickListener(view -> saveUrl());
+        TapSound.bind(saveButton, this::saveUrl);
         buttons.addView(saveButton, new LinearLayout.LayoutParams(dp(72), dp(48)));
         addIcon(buttons, "cloud", "เว็บไซต์ที่บันทึกไว้", 48, 8, () -> showSaved());
         addIcon(buttons, "settings", "ตั้งค่า", 48, 8, () -> showSettings());
@@ -259,7 +256,11 @@ public class MainActivity extends Activity {
                 web.goForward();
             }
         });
-        musicHeart = addIcon(browserBar, "heart", "เปิดพรีวิวเพลง", 48, 4, music::preview);
+        LinearLayout musicDock = new LinearLayout(this);
+        FrameLayout.LayoutParams dock = new FrameLayout.LayoutParams(-2, -2, Gravity.BOTTOM | Gravity.RIGHT);
+        dock.setMargins(0, 0, dp(6), dp(4));
+        browser.addView(musicDock, dock);
+        musicHeart = addIcon(musicDock, "heart", "เปิดพรีวิวเพลง", 48, 0, music::preview);
         updateMusicHeart();
     }
 
@@ -374,7 +375,9 @@ public class MainActivity extends Activity {
         search.setTextSize(16);
         search.setPadding(dp(14), 0, dp(14), 0);
         search.setMinHeight(dp(48));
-        search.setBackground(sheet.surface(0xffede8db, 16));
+        search.setBackground(sheet.surface(sheet.theme.surface, 16));
+        search.setTextColor(sheet.theme.ink);
+        search.setHintTextColor(sheet.theme.muted);
         sheet.row(search);
         LinearLayout results = sheet.column();
         sheet.body.addView(results);
@@ -394,12 +397,12 @@ public class MainActivity extends Activity {
             if (!link.toLowerCase(Locale.ROOT).contains(query)) continue;
             LinearLayout card = new LinearLayout(this);
             card.setGravity(Gravity.CENTER_VERTICAL);
-            card.setBackground(sheet.surface(Color.WHITE, 16));
+            card.setBackground(sheet.surface(sheet.theme.surface, 16));
             LinearLayout entry = sheet.column();
             entry.setPadding(dp(12), dp(10), dp(8), dp(10));
             entry.addView(sheet.label(Uri.parse(link).getHost(), 17, true));
             TextView address = sheet.label(link, 13, false);
-            address.setTextColor(Sheets.MUTED);
+            address.setTextColor(sheet.theme.muted);
             address.setSingleLine();
             address.setEllipsize(TextUtils.TruncateAt.MIDDLE);
             entry.addView(address);
@@ -410,7 +413,7 @@ public class MainActivity extends Activity {
             });
             card.addView(entry, new LinearLayout.LayoutParams(0, -2, 1));
             TextView remove = sheet.action("ลบ", () ->
-                new AlertDialog.Builder(this).setTitle("ลบเว็บที่บันทึกไว้?")
+                new AlertDialog.Builder(this, sheet.theme.dialogTheme()).setTitle("ลบเว็บที่บันทึกไว้?")
                         .setMessage(link).setNegativeButton("ยกเลิก", null)
                         .setPositiveButton("ลบ", (d, which) -> {
                             ArrayList<String> links = savedUrls();
@@ -434,29 +437,91 @@ public class MainActivity extends Activity {
 
     private void showSettings() {
         Sheets sheet = new Sheets(this, "ตั้งค่า");
-        sheet.section("อัปเดตแอป · รุ่น " + updates.installedName());
-        sheet.row(sheet.action("ตรวจสอบอัปเดต", () -> {
+        settingsLink(sheet, "รูปลักษณ์และเสียง", Appearance.MODES[sheet.theme.mode], this::showAppearance);
+        settingsLink(sheet, "การป้องกัน", filter.adsEnabled() ? "AdGuard · เปิด" : "AdGuard · ปิด", this::showProtection);
+        settingsLink(sheet, "การอ่านเว็บ", web.getSettings().getTextZoom() + "%", this::showReading);
+        settingsLink(sheet, "ตรวจสอบอัปเดต", "รุ่น " + updates.installedName(), () -> updates.check(true));
+        sheet.dialog.show();
+    }
+
+    private void settingsLink(Sheets sheet, String title, String value, Runnable action) {
+        LinearLayout row = new LinearLayout(this);
+        row.setGravity(Gravity.CENTER_VERTICAL);
+        row.setPadding(dp(16), dp(12), dp(14), dp(12));
+        row.setMinimumHeight(dp(58));
+        row.addView(sheet.label(title, 16, true), new LinearLayout.LayoutParams(0, -2, 1));
+        TextView detail = sheet.label(value + "   ›", 14, false);
+        detail.setTextColor(sheet.theme.muted);
+        row.addView(detail);
+        sheet.clickable(row, () -> {
             sheet.dialog.dismiss();
-            updates.check(true);
-        }));
-        sheet.section("ความเป็นส่วนตัว");
-        addSwitch(sheet, "บล็อกโดเมนโฆษณา", "blockAds");
+            action.run();
+        });
+        sheet.row(row);
+    }
+
+    private Sheets settingsPage(String title) {
+        Sheets sheet = new Sheets(this, title);
+        sheet.header.addView(sheet.action("‹", () -> {
+            sheet.dialog.dismiss();
+            showSettings();
+        }), 0);
+        sheet.header.getChildAt(0).setContentDescription("กลับการตั้งค่า");
+        sheet.dialog.setOnCancelListener(dialog -> showSettings());
+        return sheet;
+    }
+
+    private void showProtection() {
+        Sheets sheet = settingsPage("การป้องกัน");
+        addSwitch(sheet, "บล็อกโฆษณา · AdGuard", "blockAds");
         addSwitch(sheet, "บล็อกโดเมนติดตาม", "blockTrackers");
         addSwitch(sheet, "บล็อกป๊อปอัปและหน้าต่างใหม่", "blockPopups");
         addSwitch(sheet, "บล็อกคุกกี้จากบุคคลที่สาม", "blockThirdPartyCookies");
         addSwitch(sheet, "บล็อกเว็บอันตราย (Safe Browsing)", "safeBrowsing");
-        sheet.section("การอ่านเว็บ");
+        sheet.dialog.show();
+    }
+
+    private void showReading() {
+        Sheets sheet = settingsPage("การอ่านเว็บ");
         choice(sheet, "ขนาดข้อความบนเว็บ", new String[]{"85%", "100%", "115%", "130%", "150%"},
                 settings.getInt("zoomStep", 1), i -> {
                     settings.edit().putInt("zoomStep", i).apply();
                     applyZoom();
                 });
+        sheet.dialog.show();
+    }
+
+    private void showAppearance() {
+        Sheets sheet = settingsPage("รูปลักษณ์และเสียง");
+        sheet.section("ธีม");
+        for (int start = 0; start < Appearance.MODES.length; start += 2) {
+            LinearLayout pair = new LinearLayout(this);
+            for (int col = 0; col < 2; col++) {
+                final int mode = start + col;
+                boolean selected = mode == sheet.theme.mode;
+                TextView tile = sheet.action((selected ? "✓  " : "") + Appearance.MODES[mode], () -> {
+                    settings.edit().putInt("themeMode", mode).apply();
+                    applyHomeTheme();
+                    sheet.dialog.dismiss();
+                    showAppearance();
+                });
+                tile.setSelected(selected);
+                if (selected) {
+                    tile.setBackground(sheet.surface(sheet.theme.ink, 14));
+                    tile.setTextColor(sheet.theme.paper);
+                }
+                LinearLayout.LayoutParams cell = new LinearLayout.LayoutParams(0, dp(52), 1);
+                if (col > 0) cell.leftMargin = dp(6);
+                pair.addView(tile, cell);
+            }
+            sheet.row(pair);
+        }
         sheet.section("หน้าหลัก");
         choice(sheet, "ฟอนต์", FONT_NAMES, settings.getInt("font", 0), i -> {
             settings.edit().putInt("font", i).apply();
             applyFont();
         });
-        String[] backgrounds = {"อำพัน", "ทะเลหมอก", "กลางคืน", "เลือกรูปจากเครื่อง"};
+        String[] backgrounds = {"ไล่เฉดนุ่ม", "ไล่เฉดตัดกัน", "เงาเข้ม", "เลือกรูปจากเครื่อง"};
         int preset = settings.getInt("palette", 0);
         choice(sheet, "พื้นหลัง", backgrounds, settings.contains("wallpaper") ? 3 : preset, i -> {
             if (i == 3) {
@@ -470,23 +535,33 @@ public class MainActivity extends Activity {
                 releaseWallpaper(settings.getString("wallpaper", ""));
                 settings.edit().remove("wallpaper").putInt("palette", i).apply();
                 applyWallpaper();
+                sheet.dialog.dismiss();
+                showAppearance();
             }
         });
         slider(sheet, "ความเบลอของรูป", "blur", 9, 24, " dp");
         slider(sheet, "ลดความสว่างพื้นหลัง", "dim", 0, 65, "%");
+        sheet.section("เสียง");
+        addSwitch(sheet, "เสียงตอบสนองเมื่อกด", "tapSound");
         sheet.dialog.show();
     }
 
     private void addSwitch(Sheets sheet, String title, String key) {
         Switch toggle = new Switch(this);
         toggle.setText(title);
-        toggle.setTextColor(Sheets.INK);
+        toggle.setTextColor(sheet.theme.ink);
         toggle.setPadding(dp(14), 0, dp(14), 0);
         toggle.setMinHeight(dp(50));
-        toggle.setBackground(sheet.surface(Color.WHITE, 14));
+        toggle.setBackground(sheet.surface(sheet.theme.surface, 14));
+        int[][] states = {{android.R.attr.state_checked}, {}};
+        toggle.setThumbTintList(new ColorStateList(states, new int[]{sheet.theme.accent, sheet.theme.muted}));
+        toggle.setTrackTintList(new ColorStateList(states, new int[]{sheet.theme.line, sheet.theme.paper}));
+        toggle.setSoundEffectsEnabled(false);
         toggle.setChecked(settings.getBoolean(key, true));
         toggle.setOnCheckedChangeListener((view, value) -> {
             settings.edit().putBoolean(key, value).apply();
+            TapSound.play(this);
+            if (key.equals("tapSound")) return;
             filter.configure(web);
             filter.stylePage(web);
             music.applyProtection();
@@ -498,10 +573,11 @@ public class MainActivity extends Activity {
         TextView row = sheet.label(title + "  ·  " + options[selected], 16, false);
         row.setPadding(dp(14), dp(12), dp(8), dp(12));
         row.setMinHeight(dp(48));
-        sheet.clickable(row, () -> new AlertDialog.Builder(this).setTitle(title)
+        sheet.clickable(row, () -> new AlertDialog.Builder(this, sheet.theme.dialogTheme()).setTitle(title)
                 .setSingleChoiceItems(options, java.util.Arrays.asList(options).indexOf(row.getTag()),
                         (dialog, i) -> {
                             dialog.dismiss();
+                            TapSound.play(this);
                             apply.accept(i);
                             row.setTag(options[i]);
                             row.setText(title + "  ·  " + options[i]);
@@ -512,12 +588,14 @@ public class MainActivity extends Activity {
 
     private void slider(Sheets sheet, String title, String key, int initial, int max, String unit) {
         LinearLayout group = sheet.column();
-        group.setBackground(sheet.surface(Color.WHITE, 14));
+        group.setBackground(sheet.surface(sheet.theme.surface, 14));
         group.setPadding(dp(12), dp(10), dp(12), dp(4));
         int current = settings.getInt(key, initial);
         TextView caption = sheet.label(title + "  ·  " + current + unit, 15, false);
         group.addView(caption);
         SeekBar slider = new SeekBar(this);
+        slider.setProgressTintList(ColorStateList.valueOf(sheet.theme.accent));
+        slider.setThumbTintList(ColorStateList.valueOf(sheet.theme.accent));
         slider.setContentDescription(title);
         slider.setMax(max);
         slider.setProgress(current);
@@ -529,7 +607,7 @@ public class MainActivity extends Activity {
                 applyWallpaperEffects();
             }
             public void onStartTrackingTouch(SeekBar bar) {}
-            public void onStopTrackingTouch(SeekBar bar) {}
+            public void onStopTrackingTouch(SeekBar bar) { TapSound.play(MainActivity.this); }
         });
         group.addView(slider, new LinearLayout.LayoutParams(-1, dp(40)));
         sheet.row(group);
@@ -557,8 +635,11 @@ public class MainActivity extends Activity {
         String previous = settings.getString("wallpaper", "");
         try {
             getContentResolver().takePersistableUriPermission(image, Intent.FLAG_GRANT_READ_URI_PERMISSION);
-            wallpaper.setImageDrawable(decodeWallpaper(image));
-            settings.edit().putString("wallpaper", image.toString()).apply();
+            android.graphics.drawable.Drawable drawable = decodeWallpaper(image);
+            int color = android.app.WallpaperColors.fromDrawable(drawable).getPrimaryColor().toArgb();
+            wallpaper.setImageDrawable(drawable);
+            settings.edit().putString("wallpaper", image.toString()).putInt("wallColor", color).apply();
+            applyHomeTheme();
             if (!previous.equals(image.toString())) releaseWallpaper(previous);
         } catch (java.io.IOException | SecurityException | IllegalArgumentException error) {
             if (!previous.equals(image.toString())) releaseWallpaper(image.toString());
@@ -578,24 +659,46 @@ public class MainActivity extends Activity {
     private android.graphics.drawable.Drawable decodeWallpaper(Uri uri) throws java.io.IOException {
         return ImageDecoder.decodeDrawable(ImageDecoder.createSource(getContentResolver(), uri),
                 (decoder, info, source) -> {
+                    decoder.setAllocator(ImageDecoder.ALLOCATOR_SOFTWARE);
                     int size = Math.max(info.getSize().getWidth(), info.getSize().getHeight());
                     decoder.setTargetSampleSize(Math.max(1, (size + 1599) / 1600));
                 });
     }
 
     private void applyWallpaper() {
-        int[][] colors = {{0xffffe9ad, GOLD, 0xffb7814a}, {0xffe4f1dc, 0xff8ac5b4, 0xff426883},
-                {0xff66638c, 0xff33334f, 0xff121829}};
-        home.setBackground(new GradientDrawable(GradientDrawable.Orientation.TL_BR,
-                colors[settings.getInt("palette", 0)]));
+        applyHomeTheme();
         applyWallpaperEffects();
         String file = settings.getString("wallpaper", "");
         wallpaper.setImageDrawable(null);
         if (file.isEmpty()) return;
         try {
-            wallpaper.setImageDrawable(decodeWallpaper(Uri.parse(file)));
+            android.graphics.drawable.Drawable drawable = decodeWallpaper(Uri.parse(file));
+            wallpaper.setImageDrawable(drawable);
+            if (!settings.contains("wallColor")) {
+                settings.edit().putInt("wallColor", android.app.WallpaperColors.fromDrawable(drawable).getPrimaryColor().toArgb()).apply();
+                applyHomeTheme();
+            }
         } catch (java.io.IOException | SecurityException | IllegalArgumentException ignored) {
-            settings.edit().remove("wallpaper").apply();
+            settings.edit().remove("wallpaper").remove("wallColor").apply();
+            applyHomeTheme();
+        }
+    }
+
+    private void applyHomeTheme() {
+        Appearance theme = new Appearance(this);
+        int preset = settings.getInt("palette", 0);
+        float contrast = new float[]{.13f, .28f, .42f}[preset];
+        int shadow = Appearance.tint(theme.paper, theme.accent, contrast);
+        home.setBackground(new GradientDrawable(GradientDrawable.Orientation.TL_BR,
+                new int[]{theme.surface, theme.paper, shadow}));
+        android.graphics.ColorMatrix mono = new android.graphics.ColorMatrix();
+        mono.setSaturation(0f);
+        wallpaper.setColorFilter(theme.mode == Appearance.WALLPAPER ? null
+                : new android.graphics.ColorMatrixColorFilter(mono));
+        if (controls != null) {
+            GradientDrawable glass = rounded((theme.surface & 0xffffff) | 0xb8000000, 30);
+            glass.setStroke(dp(1), theme.line);
+            controls.setBackground(glass);
         }
     }
 
@@ -674,7 +777,7 @@ public class MainActivity extends Activity {
         icon.setContentDescription(description);
         icon.setFocusable(true);
         styleButton(icon);
-        icon.setOnClickListener(view -> action.run());
+        TapSound.bind(icon, action);
         LinearLayout.LayoutParams layout = new LinearLayout.LayoutParams(dp(width), dp(48));
         layout.leftMargin = dp(margin);
         row.addView(icon, layout);

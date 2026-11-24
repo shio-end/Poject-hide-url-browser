@@ -46,7 +46,7 @@ final class UpdateChecker {
         this.activity = activity;
         banner = new LinearLayout(activity);
         banner.setOrientation(LinearLayout.VERTICAL);
-        banner.setBackgroundColor(0xff27241f);
+        banner.setBackgroundColor(0xff232323);
         int pad = Math.round(12 * activity.getResources().getDisplayMetrics().density);
         banner.setPadding(pad, pad / 2, pad, pad / 2);
         label = new TextView(activity);
@@ -131,7 +131,7 @@ final class UpdateChecker {
             return;
         }
         if (showStatus) hide();
-        prompt = new AlertDialog.Builder(activity)
+        prompt = new AlertDialog.Builder(activity, new Appearance(activity).dialogTheme())
                 .setTitle("มีอัปเดต " + result.name)
                 .setMessage("ดาวน์โหลดและติดตั้งทับรุ่น " + installedName()
                         + " โดยเก็บเว็บที่บันทึกไว้และการตั้งค่า")

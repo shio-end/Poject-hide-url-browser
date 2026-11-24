@@ -35,12 +35,22 @@ final class RequestFilter {
     }
 
     void configure(WebView view) {
+        musicRules(view).configure(view, adsEnabled());
         boolean blockWindows = settings.getBoolean("blockPopups", true);
         // With multiple windows enabled, WebChromeClient rejects new windows by default.
         view.getSettings().setSupportMultipleWindows(blockWindows);
         view.getSettings().setJavaScriptCanOpenWindowsAutomatically(!blockWindows);
         view.getSettings().setSafeBrowsingEnabled(settings.getBoolean("safeBrowsing", true));
         CookieManager.getInstance().setAcceptThirdPartyCookies(view, !settings.getBoolean("blockThirdPartyCookies", true));
+    }
+
+    private MusicProtection musicRules(WebView view) {
+        MusicProtection rules = (MusicProtection) view.getTag(R.id.music_protection);
+        if (rules == null) {
+            rules = new MusicProtection(resources);
+            view.setTag(R.id.music_protection, rules);
+        }
+        return rules;
     }
 
     boolean adsEnabled() {
@@ -65,7 +75,13 @@ final class RequestFilter {
         }
 
         @Override
+        public void onPageStarted(WebView view, String url, android.graphics.Bitmap icon) {
+            musicRules(view).fallback(view, url);
+        }
+
+        @Override
         public void onPageFinished(WebView view, String url) {
+            musicRules(view).fallback(view, url);
             stylePage(view);
         }
 
@@ -88,6 +104,10 @@ final class RequestFilter {
         if (!blocked && ads && "music.youtube.com".equalsIgnoreCase(host)) {
             String path = uri.getPath();
             blocked = path != null && (path.startsWith("/pagead/") || path.equals("/api/stats/ads"));
+        }
+        if (!blocked && ads && host != null && (host.equals("spotify.com") || host.endsWith(".spotify.com"))) {
+            String path = uri.getPath();
+            blocked = path != null && path.startsWith("/ad-logic/");
         }
         if (!blocked) return null;
         return new WebResourceResponse("text/plain", "UTF-8", 403, "Blocked",

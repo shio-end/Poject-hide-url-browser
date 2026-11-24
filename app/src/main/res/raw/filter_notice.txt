@@ -1,8 +1,17 @@
-Ad and tracking domain data derived from EasyList and EasyPrivacy.
+Tracking domain data derived from EasyPrivacy.
 The EasyList authors (https://easylist.to/).
 Snapshot 202611240540, upstream commit 227f2f7fd8bf50e7e339f2d94ad2b78807ed8f19.
 Sources: https://easylist.to/easylist/easylist.txt and https://easylist.to/easylist/easyprivacy.txt
 This adaptation extracts and sorts unqualified whole-domain rules, omitting hosts with explicit hostname-based exceptions.
-The two derived lists are licensed under Creative Commons Attribution-ShareAlike 3.0 Unported.
+The derived tracking rules are licensed under Creative Commons Attribution-ShareAlike 3.0 Unported.
 https://creativecommons.org/licenses/by-sa/3.0/
 https://easylist.to/pages/licence.html
+
+Ad blocking data and music scripts from AdGuard Base filter 2.5.6.71 (AdGuard and its contributors).
+https://filters.adtidy.org/extension/chromium/filters/2.txt
+https://github.com/AdguardTeam/AdguardFilters
+ad_domains.txt extracts unqualified whole-domain rules, omitting hosts with hostname-based exceptions.
+adguard_spotify.js wraps the Spotify ad-only playback rule.
+adguard_youtube.js uses the three player ad-placement rules for JSON, XHR and Fetch with
+AdGuard Scriptlets 2.6.0 (https://github.com/AdguardTeam/Scriptlets/tree/v2.6.0).
+The packaged AdGuard resources are under GPL-3.0. See adguard_license.txt.

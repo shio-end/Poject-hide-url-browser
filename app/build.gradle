@@ -10,7 +10,11 @@ android {
         applicationId 'com.hideurl.browser'
         minSdk 31
         targetSdk 34
-        versionCode 8
-        versionName '0.7.1'
+        versionCode 9
+        versionName '0.8.0'
     }
+}
+
+dependencies {
+    implementation 'androidx.webkit:webkit:1.10.0'
 }

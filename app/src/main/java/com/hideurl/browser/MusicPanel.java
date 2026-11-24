@@ -147,7 +147,7 @@ final class MusicPanel {
                     return;
                 }
                 pendingMedia = request;
-                mediaPrompt = new AlertDialog.Builder(activity)
+                mediaPrompt = new AlertDialog.Builder(activity, new Appearance(activity).dialogTheme())
                         .setTitle("เล่นเนื้อหาที่มีการคุ้มครอง")
                         .setMessage("อนุญาตให้ " + service.title + " ใช้รหัสสื่อของอุปกรณ์สำหรับเล่นเพลงนี้ไหม?")
                         .setPositiveButton("อนุญาต", (dialog, which) -> finishMediaRequest(true))
@@ -196,9 +196,9 @@ final class MusicPanel {
                 android.content.res.ColorStateList.valueOf(0x55ffffff), circle, null));
         heart.setPadding(dp(8), dp(8), dp(8), dp(8));
         heart.setContentDescription("ย่อพรีวิวเพลง");
-        heart.setOnClickListener(v -> minimize());
-        FrameLayout.LayoutParams corner = new FrameLayout.LayoutParams(dp(48), dp(48), Gravity.BOTTOM | Gravity.LEFT);
-        corner.setMargins(dp(8), 0, 0, dp(8));
+        TapSound.bind(heart, this::minimize);
+        FrameLayout.LayoutParams corner = new FrameLayout.LayoutParams(dp(48), dp(48), Gravity.BOTTOM | Gravity.RIGHT);
+        corner.setMargins(0, 0, dp(8), dp(8));
         card.addView(heart, corner);
         root.addView(panel, new FrameLayout.LayoutParams(-1, -1));
         backdrop(true);
