@@ -1,0 +1,16 @@
+plugins {
+    id 'com.android.application' version '8.7.3'
+}
+
+android {
+    namespace 'com.hideurl.browser'
+    compileSdk 34
+
+    defaultConfig {
+        applicationId 'com.hideurl.browser'
+        minSdk 31
+        targetSdk 34
+        versionCode 1
+        versionName '0.1.0'
+    }
+}
