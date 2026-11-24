@@ -16,10 +16,20 @@ import javax.net.ssl.HttpsURLConnection;
 
 final class UpdateDownload {
     static void fetch(Context context, PublishedVersion version, IntConsumer progress) throws IOException {
+        try {
+            fetch(context, version, progress, version.apkUrl());
+        } catch (IOException failure) {
+            if (Thread.currentThread().isInterrupted()) throw failure;
+            fetch(context, version, progress, ReleaseFeed.CONTENTS + "Hide-URL-Browser.apk?ref=v" + version.name);
+        }
+    }
+
+    private static void fetch(Context context, PublishedVersion version, IntConsumer progress, String url) throws IOException {
         File temp = File.createTempFile("update-", ".apk", context.getCacheDir());
-        HttpsURLConnection connection = (HttpsURLConnection) new URL(version.apkUrl()).openConnection();
+        HttpsURLConnection connection = (HttpsURLConnection) new URL(url).openConnection();
         try {
             connection.setInstanceFollowRedirects(false);
+            connection.setRequestProperty("Accept", "application/vnd.github.raw+json");
             connection.setConnectTimeout(10000);
             connection.setReadTimeout(15000);
             if (connection.getResponseCode() != 200) throw new IOException("Download failed");

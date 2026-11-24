@@ -17,14 +17,11 @@ import android.net.Uri;
 import android.widget.Toast;
 
 import java.io.IOException;
-import java.io.InputStream;
-import java.net.URL;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
-import javax.net.ssl.HttpsURLConnection;
 
 final class UpdateChecker {
-    private static final long CHECK_INTERVAL = 24 * 60 * 60 * 1000L;
+    private static final long CHECK_INTERVAL = 15 * 60 * 1000L;
     private final Activity activity;
     private final SharedPreferences settings;
     private final PackageInfo installed;
@@ -34,9 +31,13 @@ final class UpdateChecker {
     private final LinearLayout banner;
     private final TextView label;
     private final ProgressBar bar;
+    private final Runnable hideCompleted = this::hide;
     private boolean downloading;
     private boolean closed;
     private boolean checking;
+    private long nextAutoCheck;
+    private boolean pendingReport;
+    private PublishedVersion pendingRelease;
     private boolean manual;
     private boolean visible;
     private AlertDialog prompt;
@@ -74,12 +75,17 @@ final class UpdateChecker {
             settings.edit().remove("completed").remove("restartFor").remove("staged").apply();
             UpdateApkProvider.apk(activity).delete();
             status("อัปเดตเป็น " + installedName() + " แล้ว", 100, null);
-            banner.postDelayed(() -> { if (!downloading && staged() <= current) hide(); }, 4200);
+            banner.postDelayed(hideCompleted, 4200);
         } else if (!downloading && staged() > current && UpdateApkProvider.apk(activity).isFile()) {
             ready();
         }
-        long age = System.currentTimeMillis() - settings.getLong("lastCheck", 0);
-        if (age < 0 || age >= CHECK_INTERVAL) check(false);
+        if (pendingReport) {
+            pendingReport = false;
+            finish(pendingRelease);
+            pendingRelease = null;
+        } else if (android.os.SystemClock.elapsedRealtime() >= nextAutoCheck) {
+            check(false);
+        }
     }
 
     void onStop() { visible = false; }
@@ -88,53 +94,43 @@ final class UpdateChecker {
         if (downloading || (prompt != null && prompt.isShowing())) return;
         if (userRequested) {
             manual = true;
-            message("กำลังตรวจสอบรุ่นล่าสุด…");
+            status("กำลังตรวจสอบรุ่นล่าสุด…", -1, null);
         }
         if (checking) return;
         checking = true;
         worker.execute(() -> {
             PublishedVersion latest = null;
             try {
-                latest = fetch();
+                latest = ReleaseFeed.latest();
             } catch (IOException | IllegalArgumentException ignored) {
-                // Keep the previous successful check time so a retry can run.
+                // A failed lookup is reported separately from a current installation.
             }
             PublishedVersion result = latest;
             activity.runOnUiThread(() -> finish(result));
         });
     }
 
-    private static PublishedVersion fetch() throws IOException {
-        URL url = new URL(PublishedVersion.REPOSITORY + "main/downloads/latest.properties");
-        HttpsURLConnection connection = (HttpsURLConnection) url.openConnection();
-        connection.setConnectTimeout(6000);
-        connection.setReadTimeout(6000);
-        connection.setUseCaches(false);
-        connection.setInstanceFollowRedirects(false);
-        try {
-            if (connection.getResponseCode() != 200) throw new IOException("Release feed unavailable");
-            try (InputStream stream = connection.getInputStream()) {
-                return PublishedVersion.read(stream);
-            }
-        } finally {
-            connection.disconnect();
-        }
-    }
-
     private void finish(PublishedVersion result) {
         checking = false;
+        if (closed || activity.isFinishing() || activity.isDestroyed()) return;
+        if (!visible) {
+            pendingRelease = result;
+            pendingReport = true;
+            return;
+        }
         boolean showStatus = manual;
         manual = false;
-        if (!visible || activity.isDestroyed() || activity.isFinishing()) return;
-        if (result == null) {
-            if (showStatus) message("ตรวจสอบรุ่นล่าสุดไม่ได้ ลองอีกครั้งเมื่อเชื่อมต่ออินเทอร์เน็ต");
+        if (result == null || result.code < installed.getLongVersionCode()) {
+            nextAutoCheck = android.os.SystemClock.elapsedRealtime() + 30000L;
+            if (showStatus) status("ยืนยันรุ่นล่าสุดไม่ได้ · แตะเพื่อลองอีกครั้ง", -2, () -> check(true));
             return;
         }
-        settings.edit().putLong("lastCheck", System.currentTimeMillis()).apply();
+        nextAutoCheck = android.os.SystemClock.elapsedRealtime() + CHECK_INTERVAL;
         if (!result.isNewerThan(installed.getLongVersionCode())) {
-            if (showStatus) message("คุณใช้รุ่นล่าสุดแล้ว (" + installedName() + ")");
+            if (showStatus) status("รุ่นในเครื่อง " + installedName() + " · รุ่นล่าสุด " + result.name + " · ปิด", -2, this::hide);
             return;
         }
+        if (showStatus) hide();
         prompt = new AlertDialog.Builder(activity)
                 .setTitle("มีอัปเดต " + result.name)
                 .setMessage("ดาวน์โหลดและติดตั้งทับรุ่น " + installedName()
@@ -146,6 +142,7 @@ final class UpdateChecker {
     private long staged() { return settings.getLong("staged", -1); }
 
     private void status(String text, int percent, Runnable tap) {
+        banner.removeCallbacks(hideCompleted);
         label.setText(text);
         bar.setVisibility(percent == -2 ? View.GONE : View.VISIBLE);
         bar.setIndeterminate(percent == -1);
