@@ -1,5 +1,9 @@
 package com.hideurl.browser;
 
+import android.animation.AnimatorInflater;
+import android.animation.ValueAnimator;
+import android.content.res.ColorStateList;
+import android.graphics.drawable.RippleDrawable;
 import android.app.Activity;
 import android.app.AlertDialog;
 import android.content.Intent;
@@ -57,6 +61,18 @@ public class MainActivity extends Activity {
     @Override
     public void onCreate(Bundle state) {
         super.onCreate(state);
+        getSplashScreen().setOnExitAnimationListener(splash -> {
+            if (!ValueAnimator.areAnimatorsEnabled()) {
+                splash.remove();
+                return;
+            }
+            View cloud = splash.getIconView();
+            if (cloud != null) {
+                cloud.animate().scaleX(1.12f).scaleY(1.12f).translationY(-dp(8))
+                        .setDuration(200).start();
+            }
+            splash.animate().alpha(0f).setDuration(220).withEndAction(splash::remove).start();
+        });
         settings = getSharedPreferences("browser", MODE_PRIVATE);
         root = new FrameLayout(this);
         root.setBackgroundColor(Color.BLACK);
@@ -81,18 +97,26 @@ public class MainActivity extends Activity {
 
     private void buildHome() {
         home = new FrameLayout(this);
-        home.setBackgroundColor(GOLD);
+        home.setBackground(new GradientDrawable(GradientDrawable.Orientation.TL_BR,
+                new int[]{0xffffe9ad, GOLD, 0xffb7814a}));
         root.addView(home, new FrameLayout.LayoutParams(-1, -1));
 
         wallpaper = new ImageView(this);
         wallpaper.setScaleType(ImageView.ScaleType.CENTER_CROP);
-        wallpaper.setRenderEffect(RenderEffect.createBlurEffect(dp(5), dp(5), Shader.TileMode.CLAMP));
+        wallpaper.setRenderEffect(RenderEffect.createBlurEffect(dp(9), dp(9), Shader.TileMode.CLAMP));
         home.addView(wallpaper, new FrameLayout.LayoutParams(-1, -1));
         applyWallpaper();
 
         LinearLayout controls = new LinearLayout(this);
         controls.setOrientation(LinearLayout.VERTICAL);
-        FrameLayout.LayoutParams placement = new FrameLayout.LayoutParams(dp(236), -2, Gravity.CENTER);
+        GradientDrawable glass = new GradientDrawable(GradientDrawable.Orientation.TL_BR,
+                new int[]{0x88ffffff, 0x24ffffff, 0x18ffffff, 0x56ffffff});
+        glass.setCornerRadius(dp(32));
+        glass.setStroke(dp(1), 0xaaffffff);
+        controls.setBackground(glass);
+        controls.setElevation(dp(4));
+        controls.setPadding(dp(14), dp(14), dp(14), dp(14));
+        FrameLayout.LayoutParams placement = new FrameLayout.LayoutParams(dp(264), -2, Gravity.CENTER);
         home.addView(controls, placement);
         controls.setTranslationY(dp(38));
 
@@ -123,7 +147,7 @@ public class MainActivity extends Activity {
         saveButton.setTextColor(Color.WHITE);
         saveButton.setTextSize(18);
         saveButton.setGravity(Gravity.CENTER);
-        saveButton.setBackground(rounded(Color.BLACK, 24));
+        styleButton(saveButton);
         saveButton.setOnClickListener(view -> saveUrl());
         buttons.addView(saveButton, new LinearLayout.LayoutParams(dp(72), dp(48)));
         addIcon(buttons, "cloud", "เว็บไซต์ที่บันทึกไว้", 48, 8, () -> showSaved());
@@ -175,7 +199,6 @@ public class MainActivity extends Activity {
             }
         });
         FrameLayout.LayoutParams viewport = new FrameLayout.LayoutParams(-1, -1);
-        viewport.bottomMargin = dp(56);
         browser.addView(web, viewport);
 
         LinearLayout bar = new LinearLayout(this);
@@ -421,12 +444,18 @@ public class MainActivity extends Activity {
         return drawable;
     }
 
+    private void styleButton(View button) {
+        button.setBackground(new RippleDrawable(ColorStateList.valueOf(0x55ffffff),
+                rounded(Color.BLACK, 24), null));
+        button.setStateListAnimator(AnimatorInflater.loadStateListAnimator(this, R.animator.button_press));
+    }
+
     private View addIcon(LinearLayout row, String shape, String description, int width,
                          int margin, Runnable action) {
         Icon icon = new Icon(shape);
         icon.setContentDescription(description);
         icon.setFocusable(true);
-        icon.setBackground(rounded(Color.BLACK, 24));
+        styleButton(icon);
         icon.setOnClickListener(view -> action.run());
         LinearLayout.LayoutParams layout = new LinearLayout.LayoutParams(dp(width), dp(48));
         layout.leftMargin = dp(margin);
