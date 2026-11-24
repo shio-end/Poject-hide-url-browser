@@ -2,8 +2,10 @@ package com.hideurl.browser;
 
 import android.app.Activity;
 import android.app.AlertDialog;
-import android.content.ActivityNotFoundException;
-import android.content.Intent;
+import android.graphics.RenderEffect;
+import android.graphics.Shader;
+import android.graphics.drawable.GradientDrawable;
+import android.widget.ImageButton;
 import android.graphics.Color;
 import android.net.Uri;
 import android.view.Gravity;
@@ -11,27 +13,21 @@ import android.view.View;
 import android.webkit.PermissionRequest;
 import android.webkit.WebChromeClient;
 import android.webkit.WebResourceRequest;
-import android.webkit.WebResourceResponse;
 import android.webkit.WebView;
-import android.webkit.WebViewClient;
 import android.widget.FrameLayout;
-import android.widget.LinearLayout;
-import android.widget.TextView;
 import android.widget.Toast;
 
 final class MusicPanel {
     private enum Service {
-        YOUTUBE("YouTube Music", "music.youtube.com", "com.google.android.apps.youtube.music"),
-        SPOTIFY("Spotify", "open.spotify.com", "com.spotify.music");
+        YOUTUBE("YouTube Music", "music.youtube.com"),
+        SPOTIFY("Spotify", "open.spotify.com");
 
         final String title;
         final String host;
-        final String app;
 
-        Service(String title, String host, String app) {
+        Service(String title, String host) {
             this.title = title;
             this.host = host;
-            this.app = app;
         }
 
         Uri homepage() { return Uri.parse("https://" + host + "/"); }
@@ -40,84 +36,104 @@ final class MusicPanel {
     private final Activity activity;
     private final FrameLayout root;
     private final RequestFilter filter;
-    private LinearLayout panel;
+    private final Runnable selectionChanged;
+    private String skipScript;
+    private FrameLayout panel;
+    private FrameLayout card;
+    private Service selected;
     private WebView player;
     private Service current;
     private AlertDialog mediaPrompt;
     private PermissionRequest pendingMedia;
 
-    MusicPanel(Activity activity, FrameLayout root, RequestFilter filter) {
+    MusicPanel(Activity activity, FrameLayout root, RequestFilter filter, Runnable selectionChanged) {
         this.activity = activity;
         this.root = root;
         this.filter = filter;
+        this.selectionChanged = selectionChanged;
     }
 
     void choose() {
         Sheets sheet = new Sheets(activity, "เพลงพื้นหลัง");
         for (Service service : Service.values()) {
-            sheet.section(service.title);
-            sheet.row(sheet.action("เปิดบริการ · เข้าสู่ระบบด้วย Google", () -> {
+            sheet.row(sheet.action(service.title, () -> {
                 sheet.dialog.dismiss();
-                openOfficial(service);
-            }));
-            boolean alreadyOpen = current == service;
-            sheet.row(sheet.action(alreadyOpen ? "กลับไปที่แท็บเพลง" : "เปิดแท็บเพลงพร้อมตัวกรองโฆษณา", () -> {
-                sheet.dialog.dismiss();
-                showTab(service);
+                selected = service;
+                selectionChanged.run();
+                preview();
             }));
         }
-        sheet.row(sheet.label("เมื่อเปิดบริการ ให้กดเล่นแล้วสลับกลับมาอ่านเว็บ การเล่นเมื่อล็อกจอขึ้นกับบริการและบัญชี ตัวกรองของ Hide URL ทำงานเฉพาะในแท็บของแอป", 14, false));
-        if (player != null) {
-            sheet.row(sheet.action("ปิดแท็บเพลง · " + current.title, () -> {
+        sheet.row(sheet.label("เลือกเว็บเพลงเพื่อเปิดพรีวิว แตะหัวใจเพื่อย่อและกลับมาฟังต่อ", 14, false));
+        if (selected != null) {
+            sheet.row(sheet.action("ปิดแท็บเพลง · " + selected.title, () -> {
                 sheet.dialog.dismiss();
                 close();
+                selected = null;
+                selectionChanged.run();
             }));
         }
         sheet.dialog.show();
     }
 
-    private void openOfficial(Service service) {
-        Intent link = new Intent(Intent.ACTION_VIEW, service.homepage());
-        try {
-            try {
-                activity.startActivity(new Intent(link).setPackage(service.app));
-            } catch (ActivityNotFoundException missingApp) {
-                activity.startActivity(link);
-            }
-            close();
-        } catch (ActivityNotFoundException unavailable) {
-            Toast.makeText(activity, "ไม่พบแอปเพลงหรือเบราว์เซอร์สำหรับเปิดบริการ", Toast.LENGTH_SHORT).show();
+    boolean enabled() { return selected != null; }
+
+    String selection() { return enabled() ? selected.name() : null; }
+
+    void restore(String name) {
+        for (Service service : Service.values()) {
+            if (service.name().equals(name)) selected = service;
+        }
+        selectionChanged.run();
+    }
+
+    private void backdrop(boolean active) {
+        RenderEffect effect = active
+                ? RenderEffect.createBlurEffect(dp(9), dp(9), Shader.TileMode.CLAMP) : null;
+        for (int i = 0; i < root.getChildCount(); i++) {
+            View child = root.getChildAt(i);
+            if (child == panel) continue;
+            child.setRenderEffect(effect);
+            child.setImportantForAccessibility(active ? View.IMPORTANT_FOR_ACCESSIBILITY_NO_HIDE_DESCENDANTS
+                    : View.IMPORTANT_FOR_ACCESSIBILITY_AUTO);
         }
     }
 
-    private void showTab(Service service) {
+    private void minimize() {
+        panel.setVisibility(View.GONE);
+        backdrop(false);
+    }
+
+    void preview() {
+        Service service = selected;
+        if (service == null) return;
         if (current == service) {
             panel.setVisibility(View.VISIBLE);
             panel.bringToFront();
+            backdrop(true);
             return;
         }
         close();
         current = service;
-        panel = new LinearLayout(activity);
-        panel.setOrientation(LinearLayout.VERTICAL);
-        panel.setBackgroundColor(Color.BLACK);
-        LinearLayout tools = new LinearLayout(activity);
-        tools.setGravity(Gravity.CENTER_VERTICAL);
-        TextView name = new TextView(activity);
-        name.setText(service.title);
-        name.setTextColor(Color.WHITE);
-        name.setTextSize(17);
-        name.setPadding(dp(12), 0, 0, 0);
-        tools.addView(name, new LinearLayout.LayoutParams(0, -2, 1));
-        addControl(tools, "เข้าสู่ระบบ", () -> openOfficial(service));
-        addControl(tools, "ย่อ", () -> panel.setVisibility(View.GONE));
-        panel.addView(tools, new LinearLayout.LayoutParams(-1, dp(48)));
+        panel = new FrameLayout(activity);
+        panel.setBackgroundColor(0x73000000);
+        panel.setOnClickListener(v -> minimize());
+        card = new FrameLayout(activity);
+        GradientDrawable surface = new GradientDrawable();
+        surface.setColor(0xff393939);
+        surface.setCornerRadius(dp(16));
+        card.setBackground(surface);
+        card.setClipToOutline(true);
+        card.setClickable(true);
+        FrameLayout.LayoutParams inset = new FrameLayout.LayoutParams(-1, -1);
+        inset.setMargins(dp(16), dp(12), dp(16), dp(12));
+        panel.addView(card, inset);
 
         player = new WebView(activity);
         player.getSettings().setJavaScriptEnabled(true);
         player.getSettings().setDomStorageEnabled(true);
         player.getSettings().setAllowFileAccess(false);
         player.getSettings().setAllowContentAccess(false);
+        filter.configure(player);
         player.setWebChromeClient(new WebChromeClient() {
             @Override
             public void onPermissionRequest(PermissionRequest request) {
@@ -148,40 +164,70 @@ final class MusicPanel {
                 }
             }
         });
-        player.setWebViewClient(new WebViewClient() {
+        player.setWebViewClient(filter.new Client() {
             @Override
-            public WebResourceResponse shouldInterceptRequest(WebView view, WebResourceRequest request) {
-                return filter.intercept(request);
+            public void onPageFinished(WebView view, String url) {
+                super.onPageFinished(view, url);
+                if (view == player) updateMusicAds();
             }
+
 
             @Override
             public boolean shouldOverrideUrlLoading(WebView view, WebResourceRequest request) {
                 Uri uri = request.getUrl();
                 if (!"https".equalsIgnoreCase(uri.getScheme())) return true;
                 if (!request.isForMainFrame() || service.host.equalsIgnoreCase(uri.getHost())) return false;
-                if (request.hasGesture() || "accounts.google.com".equalsIgnoreCase(uri.getHost())
-                        || "accounts.spotify.com".equalsIgnoreCase(uri.getHost())) {
-                    Toast.makeText(activity, "แตะ “เข้าสู่ระบบ” เพื่อเปิดบริการและใช้บัญชีของคุณ", Toast.LENGTH_SHORT).show();
+                if (service == Service.YOUTUBE && ("consent.youtube.com".equalsIgnoreCase(uri.getHost())
+                        || "consent.google.com".equalsIgnoreCase(uri.getHost()))) return false;
+                if (service == Service.SPOTIFY && "accounts.spotify.com".equalsIgnoreCase(uri.getHost())) return false;
+                if ("accounts.google.com".equalsIgnoreCase(uri.getHost())) {
+                    Toast.makeText(activity, "Google จำกัดการเข้าสู่ระบบในแท็บฝังตัวนี้", Toast.LENGTH_LONG).show();
                 }
                 return true;
             }
         });
-        panel.addView(player, new LinearLayout.LayoutParams(-1, 0, 1));
+        card.addView(player, new FrameLayout.LayoutParams(-1, -1));
+        ImageButton heart = new ImageButton(activity);
+        GradientDrawable circle = new GradientDrawable();
+        circle.setShape(GradientDrawable.OVAL);
+        circle.setColor(Color.BLACK);
+        heart.setImageResource(R.drawable.ic_music_heart);
+        heart.setBackground(new android.graphics.drawable.RippleDrawable(
+                android.content.res.ColorStateList.valueOf(0x55ffffff), circle, null));
+        heart.setPadding(dp(8), dp(8), dp(8), dp(8));
+        heart.setContentDescription("ย่อพรีวิวเพลง");
+        heart.setOnClickListener(v -> minimize());
+        FrameLayout.LayoutParams corner = new FrameLayout.LayoutParams(dp(48), dp(48), Gravity.BOTTOM | Gravity.LEFT);
+        corner.setMargins(dp(8), 0, 0, dp(8));
+        card.addView(heart, corner);
         root.addView(panel, new FrameLayout.LayoutParams(-1, -1));
+        backdrop(true);
         player.loadUrl(service.homepage().toString());
     }
 
-    private void addControl(LinearLayout row, String label, Runnable action) {
-        android.widget.Button button = new android.widget.Button(activity);
-        button.setText(label);
-        button.setOnClickListener(view -> action.run());
-        row.addView(button);
+    private void updateMusicAds() {
+        if (current != Service.YOUTUBE) return;
+        if (skipScript == null) {
+            try (java.util.Scanner input = new java.util.Scanner(
+                    activity.getResources().openRawResource(R.raw.music_ads), "UTF-8")) {
+                skipScript = input.useDelimiter("\\A").next();
+            }
+        }
+        player.evaluateJavascript("(function(enabled){" + skipScript + "})(" + filter.adsEnabled() + ")", null);
+    }
+
+    void applyProtection() {
+        if (player != null) {
+            filter.configure(player);
+            filter.stylePage(player);
+            updateMusicAds();
+        }
     }
 
     boolean handleBack() {
         if (panel == null || panel.getVisibility() != View.VISIBLE) return false;
         if (player.canGoBack()) player.goBack();
-        else panel.setVisibility(View.GONE);
+        else minimize();
         return true;
     }
 
@@ -201,8 +247,10 @@ final class MusicPanel {
             finishMediaRequest(false);
         }
         player.stopLoading();
+        backdrop(false);
         root.removeView(panel);
-        panel.removeView(player);
+        card.removeView(player);
+        card = null;
         player.destroy();
         player = null;
         panel = null;

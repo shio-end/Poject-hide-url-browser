@@ -1,0 +1,8 @@
+Ad and tracking domain data derived from EasyList and EasyPrivacy.
+The EasyList authors (https://easylist.to/).
+Snapshot 202611240540, upstream commit 227f2f7fd8bf50e7e339f2d94ad2b78807ed8f19.
+Sources: https://easylist.to/easylist/easylist.txt and https://easylist.to/easylist/easyprivacy.txt
+This adaptation extracts and sorts unqualified whole-domain rules, omitting hosts with explicit hostname-based exceptions.
+The two derived lists are licensed under Creative Commons Attribution-ShareAlike 3.0 Unported.
+https://creativecommons.org/licenses/by-sa/3.0/
+https://easylist.to/pages/licence.html

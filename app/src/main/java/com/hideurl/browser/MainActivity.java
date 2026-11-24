@@ -39,7 +39,6 @@ import android.view.inputmethod.InputMethodManager;
 import android.webkit.WebResourceError;
 import android.webkit.WebResourceRequest;
 import android.webkit.WebView;
-import android.webkit.WebViewClient;
 import android.widget.EditText;
 import android.widget.FrameLayout;
 import android.widget.ImageView;
@@ -58,6 +57,8 @@ public class MainActivity extends Activity {
 
     private UpdateChecker updates;
     private MusicPanel music;
+    private View musicHeart;
+    private RequestFilter filter;
     private SharedPreferences settings;
     private FrameLayout root;
     private FrameLayout home;
@@ -100,9 +101,11 @@ public class MainActivity extends Activity {
         getWindow().getInsetsController().hide(WindowInsets.Type.systemBars());
 
         choosingWallpaper = state != null && state.getBoolean("choosingWallpaper");
-        music = new MusicPanel(this, root, new RequestFilter(settings));
+        filter = new RequestFilter(settings, getResources());
+        music = new MusicPanel(this, root, filter, this::updateMusicHeart);
         buildHome();
         buildBrowser();
+        if (state != null) music.restore(state.getString("musicService"));
         String latest = settings.getString("latest", "");
         Bundle webState = state == null ? null : state.getBundle("web");
         if (webState != null && web.restoreState(webState) != null) {
@@ -197,13 +200,10 @@ public class MainActivity extends Activity {
         web.getSettings().setAllowFileAccess(false);
         web.getSettings().setAllowContentAccess(false);
         applyZoom();
-        RequestFilter filter = new RequestFilter(settings);
+        filter.configure(web);
+        web.setWebChromeClient(new android.webkit.WebChromeClient());
         ServiceWorkerController.getInstance().setServiceWorkerClient(new WorkerFilter(filter));
-        web.setWebViewClient(new WebViewClient() {
-            @Override
-            public WebResourceResponse shouldInterceptRequest(WebView view, WebResourceRequest request) {
-                return filter.intercept(request);
-            }
+        web.setWebViewClient(filter.new Client() {
 
             @Override
             public boolean shouldOverrideUrlLoading(WebView view, WebResourceRequest request) {
@@ -218,6 +218,7 @@ public class MainActivity extends Activity {
 
             @Override
             public void onPageFinished(WebView view, String url) {
+                super.onPageFinished(view, url);
                 updateNavigation();
             }
 
@@ -258,6 +259,12 @@ public class MainActivity extends Activity {
                 web.goForward();
             }
         });
+        musicHeart = addIcon(browserBar, "heart", "เปิดพรีวิวเพลง", 48, 4, music::preview);
+        updateMusicHeart();
+    }
+
+    private void updateMusicHeart() {
+        musicHeart.setVisibility(music.enabled() ? View.VISIBLE : View.GONE);
     }
 
     private void showPage(boolean browsing) {
@@ -435,6 +442,9 @@ public class MainActivity extends Activity {
         sheet.section("ความเป็นส่วนตัว");
         addSwitch(sheet, "บล็อกโดเมนโฆษณา", "blockAds");
         addSwitch(sheet, "บล็อกโดเมนติดตาม", "blockTrackers");
+        addSwitch(sheet, "บล็อกป๊อปอัปและหน้าต่างใหม่", "blockPopups");
+        addSwitch(sheet, "บล็อกคุกกี้จากบุคคลที่สาม", "blockThirdPartyCookies");
+        addSwitch(sheet, "บล็อกเว็บอันตราย (Safe Browsing)", "safeBrowsing");
         sheet.section("การอ่านเว็บ");
         choice(sheet, "ขนาดข้อความบนเว็บ", new String[]{"85%", "100%", "115%", "130%", "150%"},
                 settings.getInt("zoomStep", 1), i -> {
@@ -475,7 +485,12 @@ public class MainActivity extends Activity {
         toggle.setMinHeight(dp(50));
         toggle.setBackground(sheet.surface(Color.WHITE, 14));
         toggle.setChecked(settings.getBoolean(key, true));
-        toggle.setOnCheckedChangeListener((view, value) -> settings.edit().putBoolean(key, value).apply());
+        toggle.setOnCheckedChangeListener((view, value) -> {
+            settings.edit().putBoolean(key, value).apply();
+            filter.configure(web);
+            filter.stylePage(web);
+            music.applyProtection();
+        });
         sheet.row(toggle);
     }
 
@@ -611,6 +626,7 @@ public class MainActivity extends Activity {
         super.onSaveInstanceState(state);
         Bundle webState = new Bundle();
         web.saveState(webState);
+        state.putString("musicService", music.selection());
         state.putBoolean("choosingWallpaper", choosingWallpaper);
         state.putBundle("web", webState);
         state.putBoolean("browsing", browser.getVisibility() == View.VISIBLE);
@@ -688,6 +704,11 @@ public class MainActivity extends Activity {
             canvas.scale(size / 32f, size / 32f);
             paint.setColor(Color.WHITE);
             switch (shape) {
+                case "heart":
+                    android.graphics.drawable.Drawable heart = getDrawable(R.drawable.ic_music_heart);
+                    heart.setBounds(0, 0, 32, 32);
+                    heart.draw(canvas);
+                    break;
                 case "cloud":
                     canvas.drawRoundRect(1, 13, 31, 25, 6, 6, paint);
                     canvas.drawCircle(10, 15, 6, paint);
