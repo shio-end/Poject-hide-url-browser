@@ -64,6 +64,10 @@ final class MusicPanel {
                 preview();
             }));
         }
+        sheet.row(sheet.action("ค้นหาเพลงด้วย Google", () -> {
+            sheet.dialog.dismiss();
+            searchMusic();
+        }));
         sheet.row(sheet.action("เชื่อมบัญชี YouTube · เพลย์ลิสต์ของฉัน", () -> {
             sheet.dialog.dismiss();
             connectYoutube.run();
@@ -81,6 +85,34 @@ final class MusicPanel {
                 selectionChanged.run();
             }));
         }
+        sheet.dialog.show();
+    }
+
+    private void searchMusic() {
+        Sheets sheet = new Sheets(activity, "ค้นหาเพลงด้วย Google");
+        android.widget.EditText query = new android.widget.EditText(activity);
+        query.setSingleLine(true);
+        query.setHint("ชื่อเพลงหรือศิลปิน");
+        query.setTextColor(sheet.theme.ink);
+        query.setHintTextColor(sheet.theme.muted);
+        query.setImeOptions(android.view.inputmethod.EditorInfo.IME_ACTION_SEARCH);
+        sheet.row(query);
+        Runnable search = () -> {
+            String term = query.getText().toString().trim();
+            if (term.isEmpty()) { query.setError("กรอกชื่อเพลงหรือศิลปิน"); return; }
+            sheet.dialog.dismiss();
+            selected = Service.YOUTUBE;
+            selectionChanged.run();
+            Uri results = Uri.parse("https://www.google.com/search").buildUpon()
+                    .appendQueryParameter("q", "site:music.youtube.com " + term).build();
+            showTab(null, results);
+        };
+        query.setOnEditorActionListener((v, action, event) -> {
+            if (action != android.view.inputmethod.EditorInfo.IME_ACTION_SEARCH) return false;
+            search.run();
+            return true;
+        });
+        sheet.row(sheet.action("ค้นหา", search));
         sheet.dialog.show();
     }
 
@@ -227,6 +259,10 @@ final class MusicPanel {
                 if (!request.isForMainFrame() || service.host.equalsIgnoreCase(uri.getHost())) return false;
                 if (service == Service.YOUTUBE && ("consent.youtube.com".equalsIgnoreCase(uri.getHost())
                         || "consent.google.com".equalsIgnoreCase(uri.getHost()))) return false;
+                if (service == Service.YOUTUBE && "www.google.com".equalsIgnoreCase(uri.getHost())) {
+                    String path = uri.getPath();
+                    if ("/search".equals(path) || "/url".equals(path) || "/sorry/index".equals(path)) return false;
+                }
                 if (service == Service.SPOTIFY && "accounts.spotify.com".equalsIgnoreCase(uri.getHost())) return false;
                 if ("accounts.google.com".equalsIgnoreCase(uri.getHost())) {
                     if (service == Service.YOUTUBE && visible()) {
@@ -234,6 +270,7 @@ final class MusicPanel {
                                 .setTitle("บัญชี YouTube ใน VEIL")
                                 .setMessage("Google จำกัดการลงชื่อเข้าใช้ในหน้าเว็บฝังตัว คุณดูเพลย์ลิสต์ของบัญชีผ่าน VEIL ได้")
                                 .setPositiveButton("เพลย์ลิสต์ของฉัน", (dialog, which) -> connectYoutube.run())
+                                .setNeutralButton("ค้นหาเพลงด้วย Google", (dialog, which) -> searchMusic())
                                 .setNegativeButton("ปิด", null).show();
                     } else Toast.makeText(activity, "Google จำกัดการเข้าสู่ระบบในแท็บฝังตัวนี้", Toast.LENGTH_LONG).show();
                 }
@@ -260,7 +297,7 @@ final class MusicPanel {
     }
 
     private void updateMusicAds() {
-        if (current != Service.YOUTUBE) return;
+        if (current != Service.YOUTUBE || !Service.YOUTUBE.host.equals(RequestFilter.host(player.getUrl()))) return;
         if (skipScript == null) {
             try (java.util.Scanner input = new java.util.Scanner(
                     activity.getResources().openRawResource(R.raw.music_ads), "UTF-8")) {
