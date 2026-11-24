@@ -56,6 +56,7 @@ public class MainActivity extends Activity {
     private static final String[] FONT_FAMILIES = {"sans-serif", "serif", "monospace"};
     private static final int WALLPAPER_REQUEST = 1;
 
+    private UpdateChecker updates;
     private SharedPreferences settings;
     private FrameLayout root;
     private FrameLayout home;
@@ -85,6 +86,7 @@ public class MainActivity extends Activity {
             }
             splash.animate().alpha(0f).setDuration(220).withEndAction(splash::remove).start();
         });
+        updates = new UpdateChecker(this);
         settings = getSharedPreferences("browser", MODE_PRIVATE);
         root = new FrameLayout(this);
         root.setBackgroundColor(Color.BLACK);
@@ -419,6 +421,8 @@ public class MainActivity extends Activity {
 
     private void showSettings() {
         Sheets sheet = new Sheets(this, "ตั้งค่า");
+        sheet.section("อัปเดตแอป · รุ่น " + updates.installedName());
+        sheet.row(sheet.action("ตรวจสอบอัปเดต", () -> updates.check(true)));
         sheet.section("ความเป็นส่วนตัว");
         addSwitch(sheet, "บล็อกโดเมนโฆษณา", "blockAds");
         addSwitch(sheet, "บล็อกโดเมนติดตาม", "blockTrackers");
@@ -577,7 +581,14 @@ public class MainActivity extends Activity {
     }
 
     @Override
+    protected void onStart() {
+        super.onStart();
+        updates.onStart();
+    }
+
+    @Override
     protected void onStop() {
+        updates.onStop();
         super.onStop();
         // A launcher return may resume this Activity without calling onCreate again.
         if (!isChangingConfigurations() && !choosingWallpaper && settings.contains("latest")) {
@@ -606,6 +617,7 @@ public class MainActivity extends Activity {
 
     @Override
     protected void onDestroy() {
+        updates.close();
         browser.removeView(web);
         web.destroy();
         super.onDestroy();
