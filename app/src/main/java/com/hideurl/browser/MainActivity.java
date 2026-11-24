@@ -57,6 +57,7 @@ public class MainActivity extends Activity {
     private static final int WALLPAPER_REQUEST = 1;
 
     private UpdateChecker updates;
+    private MusicPanel music;
     private SharedPreferences settings;
     private FrameLayout root;
     private FrameLayout home;
@@ -96,6 +97,7 @@ public class MainActivity extends Activity {
         getWindow().getInsetsController().hide(WindowInsets.Type.systemBars());
 
         choosingWallpaper = state != null && state.getBoolean("choosingWallpaper");
+        music = new MusicPanel(this, root, new RequestFilter(settings));
         buildHome();
         buildBrowser();
         String latest = settings.getString("latest", "");
@@ -171,6 +173,7 @@ public class MainActivity extends Activity {
         launchRow.topMargin = dp(4);
         controls.addView(launch, launchRow);
         addIcon(launch, "play", "เปิดเว็บไซต์", 56, 0, () -> openInput());
+        addIcon(launch, "music", "เพลงพื้นหลัง", 48, 8, music::choose);
         applyFont();
         home.setFocusableInTouchMode(true);
         home.requestFocus();
@@ -608,6 +611,7 @@ public class MainActivity extends Activity {
 
     @Override
     public void onBackPressed() {
+        if (music.handleBack()) return;
         if (browser.getVisibility() == View.VISIBLE && web.canGoBack()) {
             web.goBack();
         } else {
@@ -617,6 +621,7 @@ public class MainActivity extends Activity {
 
     @Override
     protected void onDestroy() {
+        music.close();
         updates.close();
         browser.removeView(web);
         web.destroy();
@@ -686,6 +691,11 @@ public class MainActivity extends Activity {
                     polygon(canvas, 16, 2, 28, 9, 28, 23, 16, 30, 4, 23, 4, 9);
                     paint.setColor(Color.BLACK);
                     polygon(canvas, 16, 12, 20, 14, 20, 18, 16, 20, 12, 18, 12, 14);
+                    break;
+                case "music":
+                    canvas.drawCircle(7, 17, 4, paint);
+                    canvas.drawRoundRect(12, 2, 17, 30, 2.5f, 2.5f, paint);
+                    canvas.drawRoundRect(20, 7, 25, 25, 2.5f, 2.5f, paint);
                     break;
                 case "play":
                     polygon(canvas, 8, 2, 30, 16, 8, 30);
