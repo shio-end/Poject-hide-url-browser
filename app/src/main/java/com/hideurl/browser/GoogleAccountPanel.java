@@ -16,7 +16,7 @@ import java.net.URL;
 import java.util.Collections;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
-import java.util.function.Consumer;
+
 import javax.net.ssl.HttpsURLConnection;
 import org.json.*;
 
@@ -27,12 +27,23 @@ final class GoogleAccountPanel {
     private final SharedPreferences profile;
     private final CancellationSignal cancellation = new CancellationSignal();
     private final ExecutorService worker = Executors.newSingleThreadExecutor();
-    private final Consumer<String> openPlaylist;
+    private final java.util.function.BiConsumer<String,String> play;
+    private final SharedPreferences library;
+    private String syncList, syncTitle;
     private boolean busy;
 
-    GoogleAccountPanel(Activity activity, Consumer<String> openPlaylist) {
+    GoogleAccountPanel(Activity activity, java.util.function.BiConsumer<String,String> play) {
         this.activity = activity;
-        this.openPlaylist = openPlaylist;
+        this.play = play;
+        library = activity.getSharedPreferences("youtube_library", Activity.MODE_PRIVATE);
+        long cutoff = System.currentTimeMillis() - java.util.concurrent.TimeUnit.DAYS.toMillis(30);
+        SharedPreferences.Editor expired = library.edit();
+        for (java.util.Map.Entry<String, ?> entry : library.getAll().entrySet()) {
+            if (entry.getKey().startsWith("updated:") && (Long) entry.getValue() <= cutoff) {
+                expired.remove(entry.getKey()).remove(entry.getKey().substring(8));
+            }
+        }
+        expired.apply();
         profile = activity.getSharedPreferences("veil_account", Activity.MODE_PRIVATE);
     }
 
@@ -61,6 +72,7 @@ final class GoogleAccountPanel {
                     activity.startActivity(new Intent(Intent.ACTION_VIEW, Uri.parse("https://myaccount.google.com/connections")))));
             s.row(s.action("ออกจากบัญชีบนเครื่องนี้", () -> {
                 s.dialog.dismiss();
+                library.edit().clear().apply();
                 profile.edit().remove("email").apply();
                 CredentialManager.create(activity).clearCredentialStateAsync(new ClearCredentialStateRequest(),
                         cancellation, activity.getMainExecutor(), new CredentialManagerCallback<Void, ClearCredentialException>() {
@@ -104,15 +116,30 @@ final class GoogleAccountPanel {
 
     void connectYoutube() {
         if (email().isEmpty()) { show(true); return; }
-        Sheets s = new Sheets(activity, "เพลย์ลิสต์ YouTube");
-        s.row(s.label("VEIL ขอสิทธิ์อ่านข้อมูล YouTube เพื่อแสดงเพลย์ลิสต์ของ " + email(), 16, false));
-        s.row(s.action("ดูเพลย์ลิสต์ของฉัน", () -> { s.dialog.dismiss(); authorize(); }));
-        s.dialog.show();
+        browse("", "เพลย์ลิสต์ของฉัน");
     }
 
-    private void authorize() {
+    private String key(String list) { return email() + "/" + list; }
+
+    private void browse(String list, String title) {
+        try {
+            String saved = library.getString(key(list), null);
+            if (saved != null) {
+                display(new JSONArray(saved), list, title, 0);
+                return;
+            }
+        } catch (JSONException ignored) { library.edit().remove(key(list)).apply(); }
+        Sheets sheet = new Sheets(activity, title);
+        sheet.row(sheet.label("ซิงก์รายการจากบัญชี " + email() + " มาเก็บบนเครื่อง", 16, false));
+        sheet.row(sheet.action("ซิงก์จาก YouTube", () -> { sheet.dialog.dismiss(); authorize(list, title); }));
+        sheet.dialog.show();
+    }
+
+    private void authorize(String list, String title) {
         if (busy) return;
         busy = true;
+        syncList = list;
+        syncTitle = title;
         AuthorizationRequest req = AuthorizationRequest.builder().setAccount(new Account(email(), "com.google"))
                 .setRequestedScopes(Collections.singletonList(new Scope(READ))).build();
         Identity.getAuthorizationClient(activity).authorize(req).addOnSuccessListener(activity, result -> {
@@ -134,51 +161,91 @@ final class GoogleAccountPanel {
     private void granted(AuthorizationResult result) {
         String token = result.getAccessToken();
         if (token == null || !result.getGrantedScopes().contains(READ)) { message("ยังไม่ได้รับสิทธิ์อ่าน YouTube"); return; }
-        load(token, "", email());
-    }
-
-    private void load(String token, String next, String owner) {
-        message("กำลังโหลดเพลย์ลิสต์…");
+        String owner = email();
+        String list = syncList == null ? "" : syncList;
+        String title = syncTitle == null ? "เพลย์ลิสต์ของฉัน" : syncTitle;
+        busy = true;
+        message("กำลังซิงก์ " + title);
         worker.execute(() -> {
-            HttpsURLConnection connection = null;
             try {
-                Uri.Builder url = Uri.parse("https://www.googleapis.com/youtube/v3/playlists").buildUpon()
-                        .appendQueryParameter("part", "snippet").appendQueryParameter("mine", "true")
-                        .appendQueryParameter("maxResults", "50");
-                if (!next.isEmpty()) url.appendQueryParameter("pageToken", next);
-                connection = (HttpsURLConnection) new URL(url.build().toString()).openConnection();
-                connection.setInstanceFollowRedirects(false);
-                connection.setConnectTimeout(12000);
-                connection.setReadTimeout(12000);
-                connection.setRequestProperty("Authorization", "Bearer " + token);
-                try (java.util.Scanner in = new java.util.Scanner(connection.getInputStream(), "UTF-8")) {
-                    JSONObject page = new JSONObject(in.useDelimiter("\\A").next());
-                    activity.runOnUiThread(() -> {
-                        if (!cancellation.isCanceled() && owner.equals(email())) display(page, token, owner);
-                    });
-                }
-            } catch (Exception e) { activity.runOnUiThread(() -> message("โหลดเพลย์ลิสต์ไม่ได้ กรุณาลองอีกครั้ง")); }
-            finally { if (connection != null) connection.disconnect(); }
+                JSONArray rows = fetch(token, list);
+                activity.runOnUiThread(() -> {
+                    busy = false;
+                    if (cancellation.isCanceled() || !owner.equals(email())) return;
+                    String cacheKey = key(list);
+                    library.edit().putString(cacheKey, rows.toString())
+                            .putLong("updated:" + cacheKey, System.currentTimeMillis()).apply();
+                    display(rows, list, title, 0);
+                });
+            } catch (Exception error) {
+                activity.runOnUiThread(() -> {
+                    busy = false;
+                    message("ซิงก์ไม่สำเร็จ ข้อมูลที่ซิงก์ไว้ก่อนหน้ายังเปิดดูได้");
+                });
+            }
         });
     }
 
-    private void display(JSONObject page, String token, String owner) {
-        Sheets s = new Sheets(activity, "เพลย์ลิสต์ YouTube ของฉัน");
-        s.row(s.label("พรีวิวเพลงใช้เซสชันของเว็บไซต์ เพลย์ลิสต์ส่วนตัวอาจเปิดเล่นไม่ได้", 14, false));
-        JSONArray items = page.optJSONArray("items");
-        if (items == null || items.length() == 0) s.row(s.label("ยังไม่มีเพลย์ลิสต์", 16, false));
-        if (items != null) for (int i = 0; i < items.length(); i++) {
-            JSONObject item = items.optJSONObject(i);
-            if (item == null || item.optJSONObject("snippet") == null) continue;
-            String id = item.optString("id");
-            s.row(s.action(item.optJSONObject("snippet").optString("title"), () -> {
-                s.dialog.dismiss();
-                openPlaylist.accept(id);
+    private JSONArray fetch(String token, String list) throws Exception {
+        JSONArray rows = new JSONArray();
+        String next = "";
+        do {
+            if (cancellation.isCanceled()) throw new java.io.InterruptedIOException();
+            Uri.Builder url = Uri.parse("https://www.googleapis.com/youtube/v3/").buildUpon()
+                    .appendPath(list.isEmpty() ? "playlists" : "playlistItems")
+                    .appendQueryParameter("part", "snippet").appendQueryParameter("maxResults", "50")
+                    .appendQueryParameter(list.isEmpty() ? "mine" : "playlistId", list.isEmpty() ? "true" : list)
+                    .appendQueryParameter("fields", list.isEmpty() ? "nextPageToken,items(id,snippet/title)"
+                            : "nextPageToken,items(snippet(title,resourceId/videoId))");
+            if (!next.isEmpty()) url.appendQueryParameter("pageToken", next);
+            HttpsURLConnection conn = (HttpsURLConnection) new URL(url.build().toString()).openConnection();
+            try {
+                conn.setInstanceFollowRedirects(false);
+                conn.setConnectTimeout(12000);
+                conn.setReadTimeout(12000);
+                conn.setRequestProperty("Authorization", "Bearer " + token);
+                try (java.util.Scanner in = new java.util.Scanner(conn.getInputStream(), "UTF-8")) {
+                    JSONObject page = new JSONObject(in.useDelimiter("\\A").next());
+                    JSONArray items = page.getJSONArray("items");
+                    for (int i = 0; i < items.length(); i++) {
+                        JSONObject item = items.getJSONObject(i);
+                        JSONObject snippet = item.getJSONObject("snippet");
+                        String id = list.isEmpty() ? item.getString("id")
+                                : snippet.getJSONObject("resourceId").optString("videoId");
+                        if (!id.isEmpty()) rows.put(new JSONObject().put("id", id).put("title", snippet.getString("title")));
+                    }
+                    next = page.optString("nextPageToken");
+                }
+            } finally { conn.disconnect(); }
+        } while (!next.isEmpty());
+        return rows;
+    }
+
+    private void display(JSONArray rows, String list, String title, int offset) {
+        Sheets sheet = new Sheets(activity, title);
+        sheet.row(sheet.action("ซิงก์อีกครั้ง", () -> { sheet.dialog.dismiss(); authorize(list, title); }));
+        if (!list.isEmpty()) {
+            sheet.row(sheet.action("เปิดทั้งเพลย์ลิสต์", () -> { sheet.dialog.dismiss(); play.accept(list, ""); }));
+            sheet.row(sheet.action("กลับไปคลังเพลง", () -> { sheet.dialog.dismiss(); connectYoutube(); }));
+        }
+        if (rows.length() == 0) sheet.row(sheet.label("ยังไม่มีรายการ", 16, false));
+        for (int i = offset; i < Math.min(offset + 50, rows.length()); i++) {
+            JSONObject row = rows.optJSONObject(i);
+            if (row == null) continue;
+            String id = row.optString("id"), name = row.optString("title");
+            sheet.row(sheet.action(name, () -> {
+                sheet.dialog.dismiss();
+                if (list.isEmpty()) browse(id, name);
+                else play.accept(list, id);
             }));
         }
-        String next = page.optString("nextPageToken");
-        if (!next.isEmpty()) s.row(s.action("หน้าถัดไป", () -> { s.dialog.dismiss(); load(token, next, owner); }));
-        s.dialog.show();
+        if (offset > 0) sheet.row(sheet.action("หน้าก่อนหน้า", () -> {
+            sheet.dialog.dismiss(); display(rows, list, title, offset - 50);
+        }));
+        if (offset + 50 < rows.length()) sheet.row(sheet.action("หน้าถัดไป", () -> {
+            sheet.dialog.dismiss(); display(rows, list, title, offset + 50);
+        }));
+        sheet.dialog.show();
     }
 
     private void message(String text) {

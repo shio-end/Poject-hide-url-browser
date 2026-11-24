@@ -84,10 +84,12 @@ final class MusicPanel {
         sheet.dialog.show();
     }
 
-    void openPlaylist(String id) {
+    void openPlaylist(String id, String video) {
         selected = Service.YOUTUBE;
         selectionChanged.run();
-        showTab(null, Uri.parse("https://music.youtube.com/playlist").buildUpon().appendQueryParameter("list", id).build());
+        Uri.Builder url = Service.YOUTUBE.homepage().buildUpon().appendPath(video.isEmpty() ? "playlist" : "watch");
+        if (!video.isEmpty()) url.appendQueryParameter("v", video);
+        showTab(null, url.appendQueryParameter("list", id).build());
     }
 
     boolean enabled() { return selected != null; }

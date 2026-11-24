@@ -111,7 +111,7 @@ public class MainActivity extends Activity {
 
         choosingWallpaper = state != null && state.getBoolean("choosingWallpaper");
         filter = new RequestFilter(settings, getResources());
-        account = new GoogleAccountPanel(this, id -> music.openPlaylist(id));
+        account = new GoogleAccountPanel(this, (list, video) -> music.openPlaylist(list, video));
         music = new MusicPanel(this, root, filter, this::updateMusicHeart, account::connectYoutube);
         buildHome();
         buildBrowser();
