@@ -87,11 +87,14 @@ public class MainActivity extends Activity {
             }
             splash.animate().alpha(0f).setDuration(220).withEndAction(splash::remove).start();
         });
-        updates = new UpdateChecker(this);
+        LinearLayout screen = new LinearLayout(this);
+        screen.setOrientation(LinearLayout.VERTICAL);
+        updates = new UpdateChecker(this, screen);
         settings = getSharedPreferences("browser", MODE_PRIVATE);
         root = new FrameLayout(this);
         root.setBackgroundColor(Color.BLACK);
-        setContentView(root);
+        screen.addView(root, new LinearLayout.LayoutParams(-1, 0, 1));
+        setContentView(screen);
         getWindow().getInsetsController().setSystemBarsBehavior(
                 WindowInsetsController.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE);
         getWindow().getInsetsController().hide(WindowInsets.Type.systemBars());
@@ -425,7 +428,10 @@ public class MainActivity extends Activity {
     private void showSettings() {
         Sheets sheet = new Sheets(this, "ตั้งค่า");
         sheet.section("อัปเดตแอป · รุ่น " + updates.installedName());
-        sheet.row(sheet.action("ตรวจสอบอัปเดต", () -> updates.check(true)));
+        sheet.row(sheet.action("ตรวจสอบอัปเดต", () -> {
+            sheet.dialog.dismiss();
+            updates.check(true);
+        }));
         sheet.section("ความเป็นส่วนตัว");
         addSwitch(sheet, "บล็อกโดเมนโฆษณา", "blockAds");
         addSwitch(sheet, "บล็อกโดเมนติดตาม", "blockTrackers");
@@ -528,6 +534,7 @@ public class MainActivity extends Activity {
     @Override
     protected void onActivityResult(int request, int result, Intent data) {
         super.onActivityResult(request, result, data);
+        if (updates.handleResult(request, result)) return;
         if (request != WALLPAPER_REQUEST) return;
         choosingWallpaper = false;
         if (result != RESULT_OK || data == null || data.getData() == null) return;
