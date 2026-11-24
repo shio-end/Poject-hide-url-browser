@@ -188,7 +188,7 @@ final class UpdateChecker {
     private void install() {
         try {
             if (!activity.getPackageManager().canRequestPackageInstalls()) {
-                status("อนุญาตให้ Hide URL Browser ติดตั้งอัปเดต", -2, this::install);
+                status("อนุญาตให้ VEIL ติดตั้งอัปเดต", -2, this::install);
                 activity.startActivityForResult(new Intent(Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES,
                         Uri.parse("package:" + activity.getPackageName())), AUTHORIZE);
                 return;

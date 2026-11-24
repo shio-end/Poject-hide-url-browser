@@ -60,6 +60,8 @@ public class MainActivity extends Activity {
     private MusicPanel music;
     private View musicHeart;
     private RequestFilter filter;
+    private ReadingPosition reading;
+    private static final int EXPORT_LINKS = 30, IMPORT_LINKS = 31;
     private SharedPreferences settings;
     private FrameLayout root;
     private FrameLayout home;
@@ -193,6 +195,7 @@ public class MainActivity extends Activity {
         root.addView(browser, panel);
 
         web = new WebView(this);
+        reading = new ReadingPosition(web, getSharedPreferences("reading_positions", MODE_PRIVATE));
         web.getSettings().setJavaScriptEnabled(true);
         web.getSettings().setDomStorageEnabled(true);
         web.getSettings().setAllowFileAccess(false);
@@ -204,12 +207,19 @@ public class MainActivity extends Activity {
         web.setWebViewClient(filter.new Client() {
 
             @Override
+            public void onPageStarted(WebView view, String url, android.graphics.Bitmap icon) {
+                super.onPageStarted(view, url, icon);
+                reading.start(url);
+            }
+
+            @Override
             public boolean shouldOverrideUrlLoading(WebView view, WebResourceRequest request) {
                 return !isWebUrl(request.getUrl());
             }
 
             @Override
             public void doUpdateVisitedHistory(WebView view, String url, boolean reload) {
+                reading.navigate(url);
                 remember(url);
                 updateNavigation();
             }
@@ -217,6 +227,7 @@ public class MainActivity extends Activity {
             @Override
             public void onPageFinished(WebView view, String url) {
                 super.onPageFinished(view, url);
+                if (url.equals(view.getUrl())) { reading.navigate(url); reading.restore(); }
                 updateNavigation();
             }
 
@@ -234,7 +245,27 @@ public class MainActivity extends Activity {
                 Gravity.BOTTOM | Gravity.LEFT);
         toolbar.leftMargin = dp(6);
         browser.addView(browserBar, toolbar);
-        addIcon(browserBar, "cloud", "กลับหน้าหลัก", 48, 0, () -> showPage(false));
+        View cloud = addIcon(browserBar, "cloud", "กลับหน้าหลัก · กดค้างเพื่อจัดการหน้านี้", 48, 0, () -> showPage(false));
+        cloud.setOnLongClickListener(v -> {
+            String url = web.getUrl();
+            if (url == null || !isWebUrl(Uri.parse(url))) return true;
+            String title = web.getTitle();
+            Sheets sheet = new Sheets(this, "หน้านี้");
+            sheet.row(sheet.action("บันทึกหน้านี้", () -> {
+                sheet.dialog.dismiss();
+                bookmark(url, title);
+            }));
+            sheet.row(sheet.action("การป้องกันรายเว็บ", () -> {
+                sheet.dialog.dismiss();
+                filter.panel(this, RequestFilter.host(url), () -> {
+                    filter.configure(web);
+                    music.applyProtection();
+                    web.reload();
+                });
+            }));
+            sheet.dialog.show();
+            return true;
+        });
 
         LinearLayout arrows = new LinearLayout(this);
         arrows.setGravity(Gravity.CENTER_VERTICAL);
@@ -359,12 +390,18 @@ public class MainActivity extends Activity {
 
     private void saveUrl() {
         String url = readInput();
-        if (url == null) return;
+        if (url != null) bookmark(url, null);
+    }
+
+    private void bookmark(String url, String title) {
+        SharedPreferences.Editor edit = settings.edit();
+        if (title != null && !title.trim().isEmpty()) edit.putString("title:" + url, title);
         ArrayList<String> links = savedUrls();
         if (!links.contains(url)) {
             links.add(0, url);
-            settings.edit().putString("saved", new JSONArray(links).toString()).apply();
+            edit.putString("saved", new JSONArray(links).toString());
         }
+        edit.apply();
         Toast.makeText(this, "บันทึก URL แล้ว", Toast.LENGTH_SHORT).show();
     }
 
@@ -380,6 +417,18 @@ public class MainActivity extends Activity {
         search.setTextColor(sheet.theme.ink);
         search.setHintTextColor(sheet.theme.muted);
         sheet.row(search);
+        LinearLayout transfer = new LinearLayout(this);
+        for (int request : new int[]{EXPORT_LINKS, IMPORT_LINKS}) {
+            transfer.addView(sheet.action(request == EXPORT_LINKS ? "ส่งออก" : "นำเข้า", () -> {
+                sheet.dialog.dismiss();
+                Intent picker = new Intent(request == EXPORT_LINKS ? Intent.ACTION_CREATE_DOCUMENT : Intent.ACTION_OPEN_DOCUMENT);
+                picker.addCategory(Intent.CATEGORY_OPENABLE);
+                picker.setType(request == EXPORT_LINKS ? "application/json" : "*/*");
+                if (request == EXPORT_LINKS) picker.putExtra(Intent.EXTRA_TITLE, "VEIL-bookmarks.json");
+                startActivityForResult(picker, request);
+            }), new LinearLayout.LayoutParams(0, -2, 1));
+        }
+        sheet.row(transfer);
         LinearLayout results = sheet.column();
         sheet.body.addView(results);
         search.addTextChangedListener(new TextWatcher() {
@@ -395,13 +444,14 @@ public class MainActivity extends Activity {
         results.removeAllViews();
         String query = search.getText().toString().trim().toLowerCase(Locale.ROOT);
         for (String link : savedUrls()) {
-            if (!link.toLowerCase(Locale.ROOT).contains(query)) continue;
+            String title = settings.getString("title:" + link, Uri.parse(link).getHost());
+            if (!link.toLowerCase(Locale.ROOT).contains(query) && !title.toLowerCase(Locale.ROOT).contains(query)) continue;
             LinearLayout card = new LinearLayout(this);
             card.setGravity(Gravity.CENTER_VERTICAL);
             card.setBackground(sheet.surface(sheet.theme.surface, 16));
             LinearLayout entry = sheet.column();
             entry.setPadding(dp(12), dp(10), dp(8), dp(10));
-            entry.addView(sheet.label(Uri.parse(link).getHost(), 17, true));
+            entry.addView(sheet.label(title, 17, true));
             TextView address = sheet.label(link, 13, false);
             address.setTextColor(sheet.theme.muted);
             address.setSingleLine();
@@ -419,7 +469,7 @@ public class MainActivity extends Activity {
                         .setPositiveButton("ลบ", (d, which) -> {
                             ArrayList<String> links = savedUrls();
                             links.remove(link);
-                            settings.edit().putString("saved", new JSONArray(links).toString()).apply();
+                            settings.edit().remove("title:" + link).putString("saved", new JSONArray(links).toString()).apply();
                             renderSaved(sheet, search, results);
                         }).show());
             remove.setContentDescription("ลบ " + link);
@@ -638,6 +688,10 @@ public class MainActivity extends Activity {
     protected void onActivityResult(int request, int result, Intent data) {
         super.onActivityResult(request, result, data);
         if (updates.handleResult(request, result)) return;
+        if (request == IMPORT_LINKS || request == EXPORT_LINKS) {
+            if (result == RESULT_OK && data != null && data.getData() != null) transferBookmarks(request, data.getData());
+            return;
+        }
         if (request != WALLPAPER_REQUEST && request != THEME_PHOTO_REQUEST) return;
         choosingWallpaper = false;
         if (result != RESULT_OK || data == null || data.getData() == null) return;
@@ -657,6 +711,34 @@ public class MainActivity extends Activity {
             if (!previous.equals(image.toString())) releaseWallpaper(image.toString());
             Toast.makeText(this, "เปิดรูปพื้นหลังไม่ได้", Toast.LENGTH_SHORT).show();
         }
+    }
+
+    private void transferBookmarks(int request, Uri file) {
+        new Thread(() -> {
+            try {
+                if (request == EXPORT_LINKS) {
+                    BookmarkBackup.write(getContentResolver(), file, BookmarkBackup.export(settings, savedUrls()));
+                    runOnUiThread(() -> transferResult("ส่งออกรายการแล้ว"));
+                } else {
+                    JSONArray entries = BookmarkBackup.read(getContentResolver(), file);
+                    runOnUiThread(() -> {
+                        try {
+                            int count = BookmarkBackup.merge(settings, savedUrls(), entries);
+                            transferResult("เพิ่มเว็บ " + count + " รายการ");
+                        } catch (JSONException invalid) {
+                            transferResult("ไฟล์รายการเว็บไม่ถูกต้อง");
+                        }
+                    });
+                }
+            } catch (java.io.IOException | JSONException | SecurityException error) {
+                runOnUiThread(() -> transferResult("อ่านหรือเขียนไฟล์รายการเว็บไม่ได้"));
+            }
+        }, "veil-bookmarks").start();
+    }
+
+    private void transferResult(String message) {
+        Toast.makeText(getApplicationContext(), message, Toast.LENGTH_SHORT).show();
+        if (!isFinishing() && !isDestroyed() && hasWindowFocus()) showSaved();
     }
 
     private void releaseWallpaper(String file) {
@@ -728,6 +810,7 @@ public class MainActivity extends Activity {
 
     @Override
     protected void onStop() {
+        reading.flush();
         updates.onStop();
         super.onStop();
         // A launcher return may resume this Activity without calling onCreate again.
@@ -760,6 +843,7 @@ public class MainActivity extends Activity {
     @Override
     protected void onDestroy() {
         music.close();
+        reading.close();
         updates.close();
         browser.removeView(web);
         web.destroy();

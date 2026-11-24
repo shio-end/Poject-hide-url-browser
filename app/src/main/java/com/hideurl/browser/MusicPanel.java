@@ -65,6 +65,10 @@ final class MusicPanel {
         }
         sheet.row(sheet.label("เลือกเว็บเพลงเพื่อเปิดพรีวิว แตะหัวใจเพื่อย่อและกลับมาฟังต่อ", 14, false));
         if (selected != null) {
+            sheet.row(sheet.action("การป้องกัน · " + selected.title, () -> {
+                sheet.dialog.dismiss();
+                filter.panel(activity, selected.host, () -> { applyProtection(); if (player != null) player.reload(); });
+            }));
             sheet.row(sheet.action("ปิดแท็บเพลง · " + selected.title, () -> {
                 sheet.dialog.dismiss();
                 close();
@@ -213,7 +217,7 @@ final class MusicPanel {
                 skipScript = input.useDelimiter("\\A").next();
             }
         }
-        player.evaluateJavascript("(function(enabled){" + skipScript + "})(" + filter.adsEnabled() + ")", null);
+        player.evaluateJavascript("(function(enabled){" + skipScript + "})(" + (filter.adsEnabled() && !filter.paused("music.youtube.com")) + ")", null);
     }
 
     void applyProtection() {

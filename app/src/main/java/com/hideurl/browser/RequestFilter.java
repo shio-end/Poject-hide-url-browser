@@ -35,7 +35,7 @@ final class RequestFilter {
     }
 
     void configure(WebView view) {
-        musicRules(view).configure(view, adsEnabled());
+        musicRules(view).configure(view, adsEnabled(), !paused("music.youtube.com"), !paused("open.spotify.com"));
         boolean blockWindows = settings.getBoolean("blockPopups", true);
         // With multiple windows enabled, WebChromeClient rejects new windows by default.
         view.getSettings().setSupportMultipleWindows(blockWindows);
@@ -58,7 +58,7 @@ final class RequestFilter {
     }
 
     void stylePage(WebView view) {
-        String update = adsEnabled()
+        String update = adsEnabled() && !paused(host(view.getUrl()))
                 ? "if(!s){s=document.createElement('style');s.id=id;document.head.appendChild(s)}"
                     + "s.textContent='ins.adsbygoogle,iframe[id^=google_ads_iframe],"
                     + "ytmusic-promoted-sparkles-web-renderer,[data-ad-slot][data-ad-client]"
@@ -68,14 +68,42 @@ final class RequestFilter {
                 + "let s=document.getElementById(id);" + update + "})()", null);
     }
 
+    private final java.util.LinkedHashMap<String,java.util.LinkedHashSet<String>> recent = new java.util.LinkedHashMap<>();
+
+    static String host(String url) {
+        String name = url == null ? null : Uri.parse(url).getHost();
+        return name == null ? "" : name.toLowerCase(java.util.Locale.ROOT);
+    }
+
+    boolean paused(String host) { return settings.getBoolean("pause:" + host, false); }
+
+    void panel(android.app.Activity activity, String host, Runnable refresh) {
+        if (host.isEmpty()) return;
+        Sheets sheet = new Sheets(activity, host);
+        sheet.row(sheet.action(paused(host) ? "เปิดตัวกรองโฆษณาและตัวติดตาม" : "พักตัวกรองโฆษณาและตัวติดตาม", () -> {
+            settings.edit().putBoolean("pause:" + host, !paused(host)).apply();
+            sheet.dialog.dismiss();
+            refresh.run();
+        }));
+        sheet.section("โดเมนที่บล็อกล่าสุด");
+        String detail;
+        synchronized (recent) {
+            detail = recent.containsKey(host) ? android.text.TextUtils.join("\n", recent.get(host)) : "ยังไม่มีรายการ";
+        }
+        sheet.row(sheet.label(detail, 14, false));
+        sheet.dialog.show();
+    }
+
     class Client extends WebViewClient {
+        private volatile String pageHost = "";
         @Override
         public WebResourceResponse shouldInterceptRequest(WebView view, WebResourceRequest request) {
-            return intercept(request);
+            return intercept(request, request.isForMainFrame() ? host(request.getUrl().toString()) : pageHost);
         }
 
         @Override
         public void onPageStarted(WebView view, String url, android.graphics.Bitmap icon) {
+            pageHost = host(url);
             musicRules(view).fallback(view, url);
         }
 
@@ -94,6 +122,13 @@ final class RequestFilter {
     }
 
     WebResourceResponse intercept(WebResourceRequest request) {
+        String source = request.getRequestHeaders().get("Referer");
+        if (source == null) source = request.getRequestHeaders().get("Origin");
+        return intercept(request, host(source));
+    }
+
+    private WebResourceResponse intercept(WebResourceRequest request, String site) {
+        if (paused(site)) return null;
         Uri uri = request.getUrl();
         String host = uri.getHost();
         boolean ads = adsEnabled();
@@ -110,10 +145,17 @@ final class RequestFilter {
             blocked = path != null && path.startsWith("/ad-logic/");
         }
         if (!blocked) return null;
+        if (!site.isEmpty() && host != null) synchronized (recent) {
+            if (!recent.containsKey(site) && recent.size() >= 64) recent.remove(recent.keySet().iterator().next());
+            java.util.LinkedHashSet<String> domains = recent.computeIfAbsent(site, key -> new java.util.LinkedHashSet<>());
+            domains.remove(host);
+            domains.add(host);
+            if (domains.size() > 20) domains.remove(domains.iterator().next());
+        }
         return new WebResourceResponse("text/plain", "UTF-8", 403, "Blocked",
                 Collections.singletonMap("Cache-Control", "no-store"),
                 new ByteArrayInputStream((request.isForMainFrame()
-                    ? "Hide URL Browser blocked this domain. Change protection in Settings to open it." : "")
+                    ? "VEIL blocked this domain. Change protection in Settings to open it." : "")
                     .getBytes(java.nio.charset.StandardCharsets.UTF_8)));
     }
 }
