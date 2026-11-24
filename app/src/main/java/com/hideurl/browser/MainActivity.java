@@ -62,6 +62,7 @@ public class MainActivity extends Activity {
 
     private UpdateChecker updates;
     private MusicPanel music;
+    private GoogleAccountPanel account;
     private View musicHeart;
     private RequestFilter filter;
     private ReadingPosition reading;
@@ -110,7 +111,8 @@ public class MainActivity extends Activity {
 
         choosingWallpaper = state != null && state.getBoolean("choosingWallpaper");
         filter = new RequestFilter(settings, getResources());
-        music = new MusicPanel(this, root, filter, this::updateMusicHeart);
+        account = new GoogleAccountPanel(this, id -> music.openPlaylist(id));
+        music = new MusicPanel(this, root, filter, this::updateMusicHeart, account::connectYoutube);
         buildHome();
         buildBrowser();
         if (state != null) music.restore(state.getString("musicService"));
@@ -123,6 +125,7 @@ public class MainActivity extends Activity {
         } else {
             showPage(false);
         }
+        account.welcome(!latest.isEmpty() || settings.contains("saved"));
     }
 
     private void buildHome() {
@@ -494,6 +497,7 @@ public class MainActivity extends Activity {
 
     private void showSettings() {
         Sheets sheet = new Sheets(this, "ตั้งค่า");
+        settingsLink(sheet, "บัญชี VEIL", account.email().isEmpty() ? "ผู้เยี่ยมชม" : account.email(), account::show);
         settingsLink(sheet, "รูปลักษณ์และเสียง", Appearance.MODES[sheet.theme.mode], this::showAppearance);
         settingsLink(sheet, "การป้องกัน", filter.adsEnabled() ? "AdGuard · เปิด" : "AdGuard · ปิด", this::showProtection);
         settingsLink(sheet, "การอ่านเว็บ", web.getSettings().getTextZoom() + "%", this::showReading);
@@ -693,6 +697,7 @@ public class MainActivity extends Activity {
     @Override
     protected void onActivityResult(int request, int result, Intent data) {
         super.onActivityResult(request, result, data);
+        if (request == GoogleAccountPanel.CONSENT) { account.result(result, data); return; }
         if (updates.handleResult(request, result)) return;
         if (request == IMPORT_LINKS || request == EXPORT_LINKS) {
             if (result == RESULT_OK && data != null && data.getData() != null) transferBookmarks(request, data.getData());
@@ -864,6 +869,7 @@ public class MainActivity extends Activity {
 
     @Override
     protected void onDestroy() {
+        account.close();
         music.close();
         reading.close();
         updates.close();

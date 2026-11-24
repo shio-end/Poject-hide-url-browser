@@ -37,6 +37,7 @@ final class MusicPanel {
     private final FrameLayout root;
     private final RequestFilter filter;
     private final Runnable selectionChanged;
+    private final Runnable connectYoutube;
     private String skipScript;
     private FrameLayout panel;
     private FrameLayout card;
@@ -46,7 +47,8 @@ final class MusicPanel {
     private AlertDialog mediaPrompt;
     private PermissionRequest pendingMedia;
 
-    MusicPanel(Activity activity, FrameLayout root, RequestFilter filter, Runnable selectionChanged) {
+    MusicPanel(Activity activity, FrameLayout root, RequestFilter filter, Runnable selectionChanged, Runnable connectYoutube) {
+        this.connectYoutube = connectYoutube;
         this.activity = activity;
         this.root = root;
         this.filter = filter;
@@ -63,6 +65,10 @@ final class MusicPanel {
                 preview();
             }));
         }
+        sheet.row(sheet.action("เชื่อมบัญชี YouTube · เพลย์ลิสต์ของฉัน", () -> {
+            sheet.dialog.dismiss();
+            connectYoutube.run();
+        }));
         sheet.row(sheet.label("เลือกเว็บเพลงเพื่อเปิดพรีวิว แตะหัวใจเพื่อย่อและกลับมาฟังต่อ", 14, false));
         if (selected != null) {
             sheet.row(sheet.action("การป้องกัน · " + selected.title, () -> {
@@ -77,6 +83,13 @@ final class MusicPanel {
             }));
         }
         sheet.dialog.show();
+    }
+
+    void openPlaylist(String id) {
+        selected = Service.YOUTUBE;
+        selectionChanged.run();
+        preview();
+        player.loadUrl(Uri.parse("https://music.youtube.com/playlist").buildUpon().appendQueryParameter("list", id).build().toString());
     }
 
     boolean enabled() { return selected != null; }
