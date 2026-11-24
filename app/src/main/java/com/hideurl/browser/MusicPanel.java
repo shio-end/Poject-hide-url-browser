@@ -1,16 +1,8 @@
 package com.hideurl.browser;
 
 import android.app.Activity;
-import android.content.ActivityNotFoundException;
-import android.content.Intent;
-import android.content.pm.ResolveInfo;
-import androidx.browser.customtabs.CustomTabsClient;
-import androidx.browser.customtabs.CustomTabsIntent;
-import androidx.browser.customtabs.CustomTabsService;
-import java.util.ArrayList;
 import android.app.AlertDialog;
-import android.graphics.RenderEffect;
-import android.graphics.Shader;
+import android.os.Bundle;
 import android.graphics.drawable.GradientDrawable;
 import android.widget.ImageButton;
 import android.graphics.Color;
@@ -25,9 +17,6 @@ import android.widget.FrameLayout;
 import android.widget.Toast;
 
 final class MusicPanel {
-    static final int ACCOUNT_TAB = 491;
-    boolean accountTabOpen;
-
     private enum Service {
         YOUTUBE("YouTube Music", "music.youtube.com"),
         SPOTIFY("Spotify", "open.spotify.com");
@@ -75,15 +64,11 @@ final class MusicPanel {
                 preview();
             }));
         }
-        sheet.row(sheet.action("YouTube Music · ฟังด้วยบัญชี Google", () -> {
-            if (openAccountTab(Service.YOUTUBE.homepage())) sheet.dialog.dismiss();
-        }));
-        sheet.row(sheet.label("แท็บเพลงนี้ใช้บัญชีของเบราว์เซอร์ แตะ × เพื่อกลับ VEIL", 14, false));
         sheet.row(sheet.action("เชื่อมบัญชี YouTube · เพลย์ลิสต์ของฉัน", () -> {
             sheet.dialog.dismiss();
             connectYoutube.run();
         }));
-        sheet.row(sheet.label("เลือกเว็บเพลงเพื่อเปิดพรีวิว แตะหัวใจเพื่อย่อและกลับมาฟังต่อ", 14, false));
+        sheet.row(sheet.label("เลือกบริการเพื่อเปิดแท็บเพลงใน VEIL แตะหัวใจเพื่อกลับไปหน้าเดิม", 14, false));
         if (selected != null) {
             sheet.row(sheet.action("การป้องกัน · " + selected.title, () -> {
                 sheet.dialog.dismiss();
@@ -100,53 +85,42 @@ final class MusicPanel {
     }
 
     void openPlaylist(String id) {
-        openAccountTab(Service.YOUTUBE.homepage().buildUpon().appendPath("playlist")
-                .appendQueryParameter("list", id).build());
-    }
-
-    private boolean openAccountTab(Uri musicUrl) {
-        ArrayList<String> providers = new ArrayList<>();
-        Intent service = new Intent(CustomTabsService.ACTION_CUSTOM_TABS_CONNECTION);
-        for (ResolveInfo match : activity.getPackageManager().queryIntentServices(service, 0)) {
-            if (match.serviceInfo != null) providers.add(match.serviceInfo.packageName);
-        }
-        String provider = CustomTabsClient.getPackageName(activity, providers);
-        if (provider != null) {
-            CustomTabsIntent tab = new CustomTabsIntent.Builder().setShowTitle(true).build();
-            tab.intent.setPackage(provider);
-            try {
-                tab.intent.setData(musicUrl);
-                activity.startActivityForResult(tab.intent, ACCOUNT_TAB);
-                accountTabOpen = true;
-                return true;
-            } catch (ActivityNotFoundException ignored) {
-                // The selected browser may have been disabled since the lookup.
-            }
-        }
-        Toast.makeText(activity, "กรุณาติดตั้งหรือเปิดใช้เบราว์เซอร์ที่รองรับแท็บเพลง เช่น Chrome", Toast.LENGTH_LONG).show();
-        return false;
+        selected = Service.YOUTUBE;
+        selectionChanged.run();
+        showTab(null, Uri.parse("https://music.youtube.com/playlist").buildUpon().appendQueryParameter("list", id).build());
     }
 
     boolean enabled() { return selected != null; }
 
-    String selection() { return enabled() ? selected.name() : null; }
+    boolean visible() { return panel != null && panel.getVisibility() == View.VISIBLE; }
 
-    void restore(String name) {
+    void save(Bundle state) {
+        if (selected == null) return;
+        state.putString("musicService", selected.name());
+        state.putBoolean("musicVisible", visible());
+        if (player != null) {
+            Bundle history = new Bundle();
+            if (player.saveState(history) != null) state.putBundle("musicHistory", history);
+        }
+    }
+
+    void restore(Bundle state) {
         for (Service service : Service.values()) {
-            if (service.name().equals(name)) selected = service;
+            if (service.name().equals(state.getString("musicService"))) selected = service;
         }
         selectionChanged.run();
+        Bundle history = state.getBundle("musicHistory");
+        if (history != null || state.getBoolean("musicVisible")) {
+            showTab(history, null);
+            if (!state.getBoolean("musicVisible") && panel != null) minimize();
+        }
     }
 
     private void backdrop(boolean active) {
-        RenderEffect effect = active
-                ? RenderEffect.createBlurEffect(dp(9), dp(9), Shader.TileMode.CLAMP) : null;
         for (int i = 0; i < root.getChildCount(); i++) {
             View child = root.getChildAt(i);
-            if (child == panel) continue;
-            child.setRenderEffect(effect);
-            child.setImportantForAccessibility(active ? View.IMPORTANT_FOR_ACCESSIBILITY_NO_HIDE_DESCENDANTS
-                    : View.IMPORTANT_FOR_ACCESSIBILITY_AUTO);
+            if (child != panel) child.setImportantForAccessibility(active
+                    ? View.IMPORTANT_FOR_ACCESSIBILITY_NO_HIDE_DESCENDANTS : View.IMPORTANT_FOR_ACCESSIBILITY_AUTO);
         }
     }
 
@@ -171,12 +145,15 @@ final class MusicPanel {
         card.animate().alpha(1f).translationY(0f).setDuration(180).start();
     }
 
-    void preview() {
+    void preview() { showTab(null, null); }
+
+    private void showTab(Bundle history, Uri destination) {
         Service service = selected;
         if (service == null) return;
         if (current == service) {
             panel.setVisibility(View.VISIBLE);
             panel.bringToFront();
+            if (destination != null) player.loadUrl(destination.toString());
             revealCard();
             backdrop(true);
             return;
@@ -184,20 +161,20 @@ final class MusicPanel {
         close();
         current = service;
         panel = new FrameLayout(activity);
-        panel.setBackgroundColor(0x73000000);
-        panel.setOnClickListener(v -> minimize());
+        panel.setClickable(true);
         card = new FrameLayout(activity);
         GradientDrawable surface = new GradientDrawable();
         surface.setColor(0xff393939);
-        surface.setCornerRadius(dp(16));
+
         card.setBackground(surface);
         card.setClipToOutline(true);
         card.setClickable(true);
         FrameLayout.LayoutParams inset = new FrameLayout.LayoutParams(-1, -1);
-        inset.setMargins(dp(16), dp(12), dp(16), dp(12));
+
         panel.addView(card, inset);
 
         player = new WebView(activity);
+        player.setContentDescription("แท็บเพลง " + service.title);
         player.getSettings().setJavaScriptEnabled(true);
         player.getSettings().setDomStorageEnabled(true);
         player.getSettings().setAllowFileAccess(false);
@@ -250,14 +227,13 @@ final class MusicPanel {
                         || "consent.google.com".equalsIgnoreCase(uri.getHost()))) return false;
                 if (service == Service.SPOTIFY && "accounts.spotify.com".equalsIgnoreCase(uri.getHost())) return false;
                 if ("accounts.google.com".equalsIgnoreCase(uri.getHost())) {
-                    if (service == Service.YOUTUBE && panel != null && panel.isShown()) {
+                    if (service == Service.YOUTUBE && visible()) {
                         new AlertDialog.Builder(activity, new Appearance(activity).dialogTheme())
-                                .setMessage("เปิด YouTube Music ในแท็บเพลงเพื่อลงชื่อเข้าใช้ด้วยบัญชีของเบราว์เซอร์?")
-                                .setPositiveButton("เปิดแท็บเพลง", (dialog, which) -> openAccountTab(service.homepage()))
-                                .setNegativeButton("ยกเลิก", null).show();
-                        return true;
-                    }
-                    Toast.makeText(activity, "Google จำกัดการเข้าสู่ระบบในแท็บฝังตัวนี้", Toast.LENGTH_LONG).show();
+                                .setTitle("บัญชี YouTube ใน VEIL")
+                                .setMessage("Google จำกัดการลงชื่อเข้าใช้ในหน้าเว็บฝังตัว คุณดูเพลย์ลิสต์ของบัญชีผ่าน VEIL ได้")
+                                .setPositiveButton("เพลย์ลิสต์ของฉัน", (dialog, which) -> connectYoutube.run())
+                                .setNegativeButton("ปิด", null).show();
+                    } else Toast.makeText(activity, "Google จำกัดการเข้าสู่ระบบในแท็บฝังตัวนี้", Toast.LENGTH_LONG).show();
                 }
                 return true;
             }
@@ -277,7 +253,8 @@ final class MusicPanel {
         root.addView(panel, new FrameLayout.LayoutParams(-1, -1));
         backdrop(true);
         revealCard();
-        player.loadUrl(service.homepage().toString());
+        if (history == null || player.restoreState(history) == null)
+            player.loadUrl((destination == null ? service.homepage() : destination).toString());
     }
 
     private void updateMusicAds() {
