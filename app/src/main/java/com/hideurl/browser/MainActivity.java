@@ -20,6 +20,16 @@ import android.graphics.drawable.GradientDrawable;
 import android.net.Uri;
 import android.os.Bundle;
 import android.text.InputType;
+import android.text.TextUtils;
+import android.text.TextWatcher;
+import android.text.Editable;
+import android.webkit.ServiceWorkerClient;
+import android.webkit.ServiceWorkerController;
+import android.webkit.WebResourceResponse;
+import android.widget.Switch;
+import android.widget.SeekBar;
+import java.util.Locale;
+import java.util.function.IntConsumer;
 import android.view.Gravity;
 import android.view.View;
 import android.view.WindowInsets;
@@ -51,6 +61,8 @@ public class MainActivity extends Activity {
     private FrameLayout home;
     private FrameLayout browser;
     private ImageView wallpaper;
+    private View shade;
+    private LinearLayout browserBar;
     private EditText urlInput;
     private TextView saveButton;
     private WebView web;
@@ -97,14 +109,13 @@ public class MainActivity extends Activity {
 
     private void buildHome() {
         home = new FrameLayout(this);
-        home.setBackground(new GradientDrawable(GradientDrawable.Orientation.TL_BR,
-                new int[]{0xffffe9ad, GOLD, 0xffb7814a}));
         root.addView(home, new FrameLayout.LayoutParams(-1, -1));
 
         wallpaper = new ImageView(this);
         wallpaper.setScaleType(ImageView.ScaleType.CENTER_CROP);
-        wallpaper.setRenderEffect(RenderEffect.createBlurEffect(dp(9), dp(9), Shader.TileMode.CLAMP));
         home.addView(wallpaper, new FrameLayout.LayoutParams(-1, -1));
+        shade = new View(this);
+        home.addView(shade, new FrameLayout.LayoutParams(-1, -1));
         applyWallpaper();
 
         LinearLayout controls = new LinearLayout(this);
@@ -169,6 +180,7 @@ public class MainActivity extends Activity {
         browser.setClipToOutline(true);
         FrameLayout.LayoutParams panel = new FrameLayout.LayoutParams(-1, -1);
         panel.setMargins(dp(8), dp(8), dp(8), dp(8));
+        browser.setVisibility(View.GONE);
         root.addView(browser, panel);
 
         web = new WebView(this);
@@ -176,7 +188,15 @@ public class MainActivity extends Activity {
         web.getSettings().setDomStorageEnabled(true);
         web.getSettings().setAllowFileAccess(false);
         web.getSettings().setAllowContentAccess(false);
+        applyZoom();
+        RequestFilter filter = new RequestFilter(settings);
+        ServiceWorkerController.getInstance().setServiceWorkerClient(new WorkerFilter(filter));
         web.setWebViewClient(new WebViewClient() {
+            @Override
+            public WebResourceResponse shouldInterceptRequest(WebView view, WebResourceRequest request) {
+                return filter.intercept(request);
+            }
+
             @Override
             public boolean shouldOverrideUrlLoading(WebView view, WebResourceRequest request) {
                 return !isWebUrl(request.getUrl());
@@ -201,32 +221,43 @@ public class MainActivity extends Activity {
         FrameLayout.LayoutParams viewport = new FrameLayout.LayoutParams(-1, -1);
         browser.addView(web, viewport);
 
-        LinearLayout bar = new LinearLayout(this);
-        bar.setGravity(Gravity.CENTER_VERTICAL);
+        browserBar = new LinearLayout(this);
+        browserBar.setGravity(Gravity.CENTER_VERTICAL);
         FrameLayout.LayoutParams toolbar = new FrameLayout.LayoutParams(-2, dp(56),
                 Gravity.BOTTOM | Gravity.LEFT);
         toolbar.leftMargin = dp(6);
-        browser.addView(bar, toolbar);
-        addIcon(bar, "cloud", "กลับหน้าหลัก", 48, 0, () -> showPage(false));
+        browser.addView(browserBar, toolbar);
+        addIcon(browserBar, "cloud", "กลับหน้าหลัก", 48, 0, () -> showPage(false));
 
         LinearLayout arrows = new LinearLayout(this);
         arrows.setGravity(Gravity.CENTER_VERTICAL);
         arrows.setBackground(rounded(Color.BLACK, 24));
         LinearLayout.LayoutParams arrowsPlacement = new LinearLayout.LayoutParams(-2, dp(48));
         arrowsPlacement.leftMargin = dp(4);
-        bar.addView(arrows, arrowsPlacement);
+        browserBar.addView(arrows, arrowsPlacement);
         back = addIcon(arrows, "back", "ย้อนกลับ", 48, 0, () -> {
-            if (web.canGoBack()) web.goBack();
+            if (web.canGoBack()) {
+                nudge(back, -1);
+                web.goBack();
+            }
         });
         View divider = new View(this);
         divider.setBackground(rounded(Color.WHITE, 1));
         arrows.addView(divider, new LinearLayout.LayoutParams(dp(2), dp(23)));
         forward = addIcon(arrows, "forward", "ไปข้างหน้า", 48, 0, () -> {
-            if (web.canGoForward()) web.goForward();
+            if (web.canGoForward()) {
+                nudge(forward, 1);
+                web.goForward();
+            }
         });
     }
 
     private void showPage(boolean browsing) {
+        if (browsing && browser.getVisibility() != View.VISIBLE && ValueAnimator.areAnimatorsEnabled()) {
+            browserBar.setAlpha(0f);
+            browserBar.setTranslationY(dp(14));
+            browserBar.animate().alpha(1f).translationY(0).setDuration(220).start();
+        }
         if (browsing) {
             getSystemService(InputMethodManager.class).hideSoftInputFromWindow(urlInput.getWindowToken(), 0);
             urlInput.clearFocus();
@@ -234,6 +265,23 @@ public class MainActivity extends Activity {
         home.setVisibility(browsing ? View.GONE : View.VISIBLE);
         browser.setVisibility(browsing ? View.VISIBLE : View.GONE);
         updateNavigation();
+    }
+
+    private void nudge(View arrow, int direction) {
+        if (!ValueAnimator.areAnimatorsEnabled()) return;
+        arrow.setTranslationX(direction * dp(4));
+        arrow.animate().translationX(0).setDuration(180).start();
+    }
+
+    private static final class WorkerFilter extends ServiceWorkerClient {
+        private final RequestFilter filter;
+
+        WorkerFilter(RequestFilter filter) { this.filter = filter; }
+
+        @Override
+        public WebResourceResponse shouldInterceptRequest(WebResourceRequest request) {
+            return filter.intercept(request);
+        }
     }
 
     private void updateNavigation() {
@@ -304,45 +352,170 @@ public class MainActivity extends Activity {
     }
 
     private void showSaved() {
-        ArrayList<String> links = savedUrls();
-        AlertDialog.Builder dialog = new AlertDialog.Builder(this)
-                .setTitle("เว็บไซต์ที่บันทึกไว้")
-                .setNegativeButton("ปิด", null);
-        if (links.isEmpty()) {
-            dialog.setMessage("ยังไม่มี URL ที่บันทึกไว้");
-        } else {
-            dialog.setItems(links.toArray(new String[0]), (d, index) -> {
-                String url = links.get(index);
-                urlInput.setText(url);
-                open(url);
+        Sheets sheet = new Sheets(this, "เว็บที่บันทึกไว้");
+        EditText search = new EditText(this);
+        search.setSingleLine();
+        search.setHint("ค้นหาชื่อเว็บหรือ URL");
+        search.setTextSize(16);
+        search.setPadding(dp(14), 0, dp(14), 0);
+        search.setMinHeight(dp(48));
+        search.setBackground(sheet.surface(0xffede8db, 16));
+        sheet.row(search);
+        LinearLayout results = sheet.column();
+        sheet.body.addView(results);
+        search.addTextChangedListener(new TextWatcher() {
+            public void beforeTextChanged(CharSequence s, int start, int count, int after) {}
+            public void onTextChanged(CharSequence s, int start, int before, int count) { renderSaved(sheet, search, results); }
+            public void afterTextChanged(Editable s) {}
+        });
+        renderSaved(sheet, search, results);
+        sheet.dialog.show();
+    }
+
+    private void renderSaved(Sheets sheet, EditText search, LinearLayout results) {
+        results.removeAllViews();
+        String query = search.getText().toString().trim().toLowerCase(Locale.ROOT);
+        for (String link : savedUrls()) {
+            if (!link.toLowerCase(Locale.ROOT).contains(query)) continue;
+            LinearLayout card = new LinearLayout(this);
+            card.setGravity(Gravity.CENTER_VERTICAL);
+            card.setBackground(sheet.surface(Color.WHITE, 16));
+            LinearLayout entry = sheet.column();
+            entry.setPadding(dp(12), dp(10), dp(8), dp(10));
+            entry.addView(sheet.label(Uri.parse(link).getHost(), 17, true));
+            TextView address = sheet.label(link, 13, false);
+            address.setTextColor(Sheets.MUTED);
+            address.setSingleLine();
+            address.setEllipsize(TextUtils.TruncateAt.MIDDLE);
+            entry.addView(address);
+            sheet.clickable(entry, () -> {
+                sheet.dialog.dismiss();
+                urlInput.setText(link);
+                open(link);
             });
+            card.addView(entry, new LinearLayout.LayoutParams(0, -2, 1));
+            TextView remove = sheet.action("ลบ", () ->
+                new AlertDialog.Builder(this).setTitle("ลบเว็บที่บันทึกไว้?")
+                        .setMessage(link).setNegativeButton("ยกเลิก", null)
+                        .setPositiveButton("ลบ", (d, which) -> {
+                            ArrayList<String> links = savedUrls();
+                            links.remove(link);
+                            settings.edit().putString("saved", new JSONArray(links).toString()).apply();
+                            renderSaved(sheet, search, results);
+                        }).show());
+            remove.setContentDescription("ลบ " + link);
+            card.addView(remove);
+            LinearLayout.LayoutParams gap = new LinearLayout.LayoutParams(-1, -2);
+            gap.topMargin = dp(8);
+            results.addView(card, gap);
         }
-        dialog.show();
+        if (results.getChildCount() == 0) {
+            TextView empty = sheet.label(query.isEmpty()
+                    ? "ยังไม่มีเว็บที่บันทึกไว้ · เพิ่ม URL ด้วยปุ่ม SAVE" : "ไม่พบเว็บที่ตรงกับคำค้น", 15, false);
+            empty.setPadding(dp(6), dp(18), dp(6), dp(12));
+            results.addView(empty);
+        }
     }
 
     private void showSettings() {
-        String[] options = {"เปลี่ยนฟอนต์", "เลือกรูปพื้นหลัง", "ใช้พื้นหลังเดิม"};
-        new AlertDialog.Builder(this).setTitle("ตั้งค่าหน้าหลัก")
-                .setItems(options, (dialog, index) -> {
-                    if (index == 0) {
-                        new AlertDialog.Builder(this).setTitle("ฟอนต์")
-                                .setSingleChoiceItems(FONT_NAMES, settings.getInt("font", 0), (fonts, choice) -> {
-                                    settings.edit().putInt("font", choice).apply();
-                                    applyFont();
-                                    fonts.dismiss();
-                                }).setNegativeButton("ปิด", null).show();
-                    } else if (index == 1) {
-                        Intent picker = new Intent(Intent.ACTION_OPEN_DOCUMENT);
-                        picker.addCategory(Intent.CATEGORY_OPENABLE);
-                        picker.setType("image/*");
-                        choosingWallpaper = true;
-                        startActivityForResult(picker, WALLPAPER_REQUEST);
-                    } else {
-                        releaseWallpaper(settings.getString("wallpaper", ""));
-                        settings.edit().remove("wallpaper").apply();
-                        applyWallpaper();
-                    }
-                }).setNegativeButton("ปิด", null).show();
+        Sheets sheet = new Sheets(this, "ตั้งค่า");
+        sheet.section("ความเป็นส่วนตัว");
+        addSwitch(sheet, "บล็อกโดเมนโฆษณา", "blockAds");
+        addSwitch(sheet, "บล็อกโดเมนติดตาม", "blockTrackers");
+        sheet.section("การอ่านเว็บ");
+        choice(sheet, "ขนาดข้อความบนเว็บ", new String[]{"85%", "100%", "115%", "130%", "150%"},
+                settings.getInt("zoomStep", 1), i -> {
+                    settings.edit().putInt("zoomStep", i).apply();
+                    applyZoom();
+                });
+        sheet.section("หน้าหลัก");
+        choice(sheet, "ฟอนต์", FONT_NAMES, settings.getInt("font", 0), i -> {
+            settings.edit().putInt("font", i).apply();
+            applyFont();
+        });
+        String[] backgrounds = {"อำพัน", "ทะเลหมอก", "กลางคืน", "เลือกรูปจากเครื่อง"};
+        int preset = settings.getInt("palette", 0);
+        choice(sheet, "พื้นหลัง", backgrounds, settings.contains("wallpaper") ? 3 : preset, i -> {
+            if (i == 3) {
+                Intent picker = new Intent(Intent.ACTION_OPEN_DOCUMENT);
+                picker.addCategory(Intent.CATEGORY_OPENABLE);
+                picker.setType("image/*");
+                choosingWallpaper = true;
+                sheet.dialog.dismiss();
+                startActivityForResult(picker, WALLPAPER_REQUEST);
+            } else {
+                releaseWallpaper(settings.getString("wallpaper", ""));
+                settings.edit().remove("wallpaper").putInt("palette", i).apply();
+                applyWallpaper();
+            }
+        });
+        slider(sheet, "ความเบลอของรูป", "blur", 9, 24, " dp");
+        slider(sheet, "ลดความสว่างพื้นหลัง", "dim", 0, 65, "%");
+        sheet.dialog.show();
+    }
+
+    private void addSwitch(Sheets sheet, String title, String key) {
+        Switch toggle = new Switch(this);
+        toggle.setText(title);
+        toggle.setTextColor(Sheets.INK);
+        toggle.setPadding(dp(14), 0, dp(14), 0);
+        toggle.setMinHeight(dp(50));
+        toggle.setBackground(sheet.surface(Color.WHITE, 14));
+        toggle.setChecked(settings.getBoolean(key, true));
+        toggle.setOnCheckedChangeListener((view, value) -> settings.edit().putBoolean(key, value).apply());
+        sheet.row(toggle);
+    }
+
+    private void choice(Sheets sheet, String title, String[] options, int selected, IntConsumer apply) {
+        TextView row = sheet.label(title + "  ·  " + options[selected], 16, false);
+        row.setPadding(dp(14), dp(12), dp(8), dp(12));
+        row.setMinHeight(dp(48));
+        sheet.clickable(row, () -> new AlertDialog.Builder(this).setTitle(title)
+                .setSingleChoiceItems(options, java.util.Arrays.asList(options).indexOf(row.getTag()),
+                        (dialog, i) -> {
+                            dialog.dismiss();
+                            apply.accept(i);
+                            row.setTag(options[i]);
+                            row.setText(title + "  ·  " + options[i]);
+                        }).setNegativeButton("ยกเลิก", null).show());
+        row.setTag(options[selected]);
+        sheet.row(row);
+    }
+
+    private void slider(Sheets sheet, String title, String key, int initial, int max, String unit) {
+        LinearLayout group = sheet.column();
+        group.setBackground(sheet.surface(Color.WHITE, 14));
+        group.setPadding(dp(12), dp(10), dp(12), dp(4));
+        int current = settings.getInt(key, initial);
+        TextView caption = sheet.label(title + "  ·  " + current + unit, 15, false);
+        group.addView(caption);
+        SeekBar slider = new SeekBar(this);
+        slider.setContentDescription(title);
+        slider.setMax(max);
+        slider.setProgress(current);
+        slider.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
+            public void onProgressChanged(SeekBar bar, int value, boolean user) {
+                if (!user) return;
+                caption.setText(title + "  ·  " + value + unit);
+                settings.edit().putInt(key, value).apply();
+                applyWallpaperEffects();
+            }
+            public void onStartTrackingTouch(SeekBar bar) {}
+            public void onStopTrackingTouch(SeekBar bar) {}
+        });
+        group.addView(slider, new LinearLayout.LayoutParams(-1, dp(40)));
+        sheet.row(group);
+    }
+
+    private void applyZoom() {
+        int[] sizes = {85, 100, 115, 130, 150};
+        web.getSettings().setTextZoom(sizes[settings.getInt("zoomStep", 1)]);
+    }
+
+    private void applyWallpaperEffects() {
+        int blur = dp(settings.getInt("blur", 9));
+        wallpaper.setRenderEffect(blur == 0 ? null : RenderEffect.createBlurEffect(blur, blur, Shader.TileMode.CLAMP));
+        shade.setBackgroundColor(Color.argb(settings.getInt("dim", 0) * 255 / 100, 0, 0, 0));
     }
 
     @Override
@@ -382,6 +555,11 @@ public class MainActivity extends Activity {
     }
 
     private void applyWallpaper() {
+        int[][] colors = {{0xffffe9ad, GOLD, 0xffb7814a}, {0xffe4f1dc, 0xff8ac5b4, 0xff426883},
+                {0xff66638c, 0xff33334f, 0xff121829}};
+        home.setBackground(new GradientDrawable(GradientDrawable.Orientation.TL_BR,
+                colors[settings.getInt("palette", 0)]));
+        applyWallpaperEffects();
         String file = settings.getString("wallpaper", "");
         wallpaper.setImageDrawable(null);
         if (file.isEmpty()) return;
