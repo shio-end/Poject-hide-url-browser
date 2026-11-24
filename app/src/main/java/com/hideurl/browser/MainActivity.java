@@ -113,6 +113,7 @@ public class MainActivity extends Activity {
         filter = new RequestFilter(settings, getResources());
         account = new GoogleAccountPanel(this, id -> music.openPlaylist(id));
         music = new MusicPanel(this, root, filter, this::updateMusicHeart, account::connectYoutube);
+        music.accountTabOpen = state != null && state.getBoolean("accountTabOpen");
         buildHome();
         buildBrowser();
         if (state != null) music.restore(state.getString("musicService"));
@@ -697,6 +698,7 @@ public class MainActivity extends Activity {
     @Override
     protected void onActivityResult(int request, int result, Intent data) {
         super.onActivityResult(request, result, data);
+        if (request == MusicPanel.ACCOUNT_TAB) { music.accountTabOpen = false; return; }
         if (request == GoogleAccountPanel.CONSENT) { account.result(result, data); return; }
         if (updates.handleResult(request, result)) return;
         if (request == IMPORT_LINKS || request == EXPORT_LINKS) {
@@ -841,7 +843,7 @@ public class MainActivity extends Activity {
         updates.onStop();
         super.onStop();
         // A launcher return may resume this Activity without calling onCreate again.
-        if (!isChangingConfigurations() && !choosingWallpaper && settings.contains("latest")) {
+        if (!isChangingConfigurations() && !choosingWallpaper && !music.accountTabOpen && settings.contains("latest")) {
             showPage(true);
         }
     }
@@ -851,6 +853,7 @@ public class MainActivity extends Activity {
         super.onSaveInstanceState(state);
         Bundle webState = new Bundle();
         web.saveState(webState);
+        state.putBoolean("accountTabOpen", music.accountTabOpen);
         state.putString("musicService", music.selection());
         state.putBoolean("choosingWallpaper", choosingWallpaper);
         state.putBundle("web", webState);

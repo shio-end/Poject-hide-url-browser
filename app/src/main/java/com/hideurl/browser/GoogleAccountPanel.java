@@ -164,7 +164,7 @@ final class GoogleAccountPanel {
 
     private void display(JSONObject page, String token, String owner) {
         Sheets s = new Sheets(activity, "เพลย์ลิสต์ YouTube ของฉัน");
-        s.row(s.label("พรีวิวเพลงใช้เซสชันของเว็บไซต์ เพลย์ลิสต์ส่วนตัวอาจเปิดเล่นไม่ได้", 14, false));
+        s.row(s.label("แตะเพลย์ลิสต์เพื่อเปิดในแท็บเพลง สำหรับเพลย์ลิสต์ส่วนตัว ให้เลือกบัญชีเดียวกันในแท็บนั้น", 14, false));
         JSONArray items = page.optJSONArray("items");
         if (items == null || items.length() == 0) s.row(s.label("ยังไม่มีเพลย์ลิสต์", 16, false));
         if (items != null) for (int i = 0; i < items.length(); i++) {

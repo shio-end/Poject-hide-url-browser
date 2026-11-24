@@ -1,6 +1,13 @@
 package com.hideurl.browser;
 
 import android.app.Activity;
+import android.content.ActivityNotFoundException;
+import android.content.Intent;
+import android.content.pm.ResolveInfo;
+import androidx.browser.customtabs.CustomTabsClient;
+import androidx.browser.customtabs.CustomTabsIntent;
+import androidx.browser.customtabs.CustomTabsService;
+import java.util.ArrayList;
 import android.app.AlertDialog;
 import android.graphics.RenderEffect;
 import android.graphics.Shader;
@@ -18,6 +25,9 @@ import android.widget.FrameLayout;
 import android.widget.Toast;
 
 final class MusicPanel {
+    static final int ACCOUNT_TAB = 491;
+    boolean accountTabOpen;
+
     private enum Service {
         YOUTUBE("YouTube Music", "music.youtube.com"),
         SPOTIFY("Spotify", "open.spotify.com");
@@ -65,6 +75,10 @@ final class MusicPanel {
                 preview();
             }));
         }
+        sheet.row(sheet.action("YouTube Music · ฟังด้วยบัญชี Google", () -> {
+            if (openAccountTab(Service.YOUTUBE.homepage())) sheet.dialog.dismiss();
+        }));
+        sheet.row(sheet.label("แท็บเพลงนี้ใช้บัญชีของเบราว์เซอร์ แตะ × เพื่อกลับ VEIL", 14, false));
         sheet.row(sheet.action("เชื่อมบัญชี YouTube · เพลย์ลิสต์ของฉัน", () -> {
             sheet.dialog.dismiss();
             connectYoutube.run();
@@ -86,10 +100,31 @@ final class MusicPanel {
     }
 
     void openPlaylist(String id) {
-        selected = Service.YOUTUBE;
-        selectionChanged.run();
-        preview();
-        player.loadUrl(Uri.parse("https://music.youtube.com/playlist").buildUpon().appendQueryParameter("list", id).build().toString());
+        openAccountTab(Service.YOUTUBE.homepage().buildUpon().appendPath("playlist")
+                .appendQueryParameter("list", id).build());
+    }
+
+    private boolean openAccountTab(Uri musicUrl) {
+        ArrayList<String> providers = new ArrayList<>();
+        Intent service = new Intent(CustomTabsService.ACTION_CUSTOM_TABS_CONNECTION);
+        for (ResolveInfo match : activity.getPackageManager().queryIntentServices(service, 0)) {
+            if (match.serviceInfo != null) providers.add(match.serviceInfo.packageName);
+        }
+        String provider = CustomTabsClient.getPackageName(activity, providers);
+        if (provider != null) {
+            CustomTabsIntent tab = new CustomTabsIntent.Builder().setShowTitle(true).build();
+            tab.intent.setPackage(provider);
+            try {
+                tab.intent.setData(musicUrl);
+                activity.startActivityForResult(tab.intent, ACCOUNT_TAB);
+                accountTabOpen = true;
+                return true;
+            } catch (ActivityNotFoundException ignored) {
+                // The selected browser may have been disabled since the lookup.
+            }
+        }
+        Toast.makeText(activity, "กรุณาติดตั้งหรือเปิดใช้เบราว์เซอร์ที่รองรับแท็บเพลง เช่น Chrome", Toast.LENGTH_LONG).show();
+        return false;
     }
 
     boolean enabled() { return selected != null; }
@@ -215,6 +250,13 @@ final class MusicPanel {
                         || "consent.google.com".equalsIgnoreCase(uri.getHost()))) return false;
                 if (service == Service.SPOTIFY && "accounts.spotify.com".equalsIgnoreCase(uri.getHost())) return false;
                 if ("accounts.google.com".equalsIgnoreCase(uri.getHost())) {
+                    if (service == Service.YOUTUBE && panel != null && panel.isShown()) {
+                        new AlertDialog.Builder(activity, new Appearance(activity).dialogTheme())
+                                .setMessage("เปิด YouTube Music ในแท็บเพลงเพื่อลงชื่อเข้าใช้ด้วยบัญชีของเบราว์เซอร์?")
+                                .setPositiveButton("เปิดแท็บเพลง", (dialog, which) -> openAccountTab(service.homepage()))
+                                .setNegativeButton("ยกเลิก", null).show();
+                        return true;
+                    }
                     Toast.makeText(activity, "Google จำกัดการเข้าสู่ระบบในแท็บฝังตัวนี้", Toast.LENGTH_LONG).show();
                 }
                 return true;
