@@ -19,6 +19,7 @@ final class LinkShortcut {
     static final int PHOTO = 492;
     private final Activity activity;
     String pendingUrl;
+    String pendingName;
 
     LinkShortcut(Activity activity) { this.activity = activity; }
 
@@ -27,25 +28,53 @@ final class LinkShortcut {
         if (!manager.isRequestPinShortcutSupported()) {
             message("หน้าจอหลักของเครื่องนี้ไม่รองรับการเพิ่มทางลัด"); return;
         }
-        Sheets sheet = new Sheets(activity, "สร้างทางลัดบนหน้าจอหลัก", true);
+        String id = shortcutId(url);
+        ShortcutInfo pinned = findPinned(manager, id);
+        Sheets sheet = new Sheets(activity, pinned == null ? "สร้างทางลัดบนหน้าจอหลัก" : "แก้ไขทางลัด", true);
+        EditText name = new EditText(activity);
+        name.setSingleLine(true);
+        name.setTextColor(sheet.theme.ink);
+        name.setSelectAllOnFocus(true);
+        name.setContentDescription("ชื่อไอคอนทางลัด");
+        name.setText(pinned != null && pinned.getShortLabel() != null ? pinned.getShortLabel() : defaultName(url));
+        sheet.row(sheet.label("ชื่อไอคอนทางลัด", 15, true));
+        sheet.row(name);
+        if (pinned != null) {
+            sheet.row(sheet.action("บันทึกชื่อทางลัด", () -> {
+                String label = readName(name);
+                if (label == null) return;
+                ShortcutInfo change = new ShortcutInfo.Builder(activity, id).setShortLabel(label).build();
+                if (manager.updateShortcuts(Collections.singletonList(change))) {
+                    sheet.dialog.dismiss();
+                    message("เปลี่ยนชื่อทางลัดแล้ว");
+                } else message("เปลี่ยนชื่อทางลัดไม่ได้ กรุณาลองอีกครั้ง");
+            }));
+        }
         sheet.row(sheet.action("ใช้ไอคอน VEIL", () -> {
+            String label = readName(name);
+            if (label == null) return;
             sheet.dialog.dismiss();
-            pin(url, Icon.createWithResource(activity, R.drawable.app_icon));
+            pin(url, label, Icon.createWithResource(activity, R.drawable.app_icon));
         }));
         sheet.row(sheet.action("เลือกรูปและจัดกรอบ", () -> {
+            String label = readName(name);
+            if (label == null) return;
             sheet.dialog.dismiss();
             Intent picker = new Intent(Intent.ACTION_OPEN_DOCUMENT).setType("image/*")
                     .addCategory(Intent.CATEGORY_OPENABLE);
             pendingUrl = url;
+            pendingName = label;
             try { activity.startActivityForResult(picker, PHOTO); }
-            catch (android.content.ActivityNotFoundException e) { pendingUrl = null; message("เปิดตัวเลือกรูปไม่ได้"); }
+            catch (android.content.ActivityNotFoundException e) { pendingUrl = null; pendingName = null; message("เปิดตัวเลือกรูปไม่ได้"); }
         }));
         sheet.dialog.show();
     }
 
     void photo(Uri uri) {
         String url = pendingUrl;
+        String name = pendingName;
         pendingUrl = null;
+        pendingName = null;
         if (url == null || uri == null) return;
         new Thread(() -> {
             try {
@@ -56,13 +85,13 @@ final class LinkShortcut {
                             decoder.setAllocator(ImageDecoder.ALLOCATOR_SOFTWARE);
                         });
                 activity.runOnUiThread(() -> {
-                    if (!activity.isDestroyed() && !activity.isFinishing()) crop(url, image);
+                    if (!activity.isDestroyed() && !activity.isFinishing()) crop(url, name == null ? defaultName(url) : name, image);
                 });
             } catch (Exception error) { activity.runOnUiThread(() -> message("อ่านรูปไม่ได้ กรุณาเลือกรูปใหม่")); }
         }, "veil-shortcut-image").start();
     }
 
-    private void crop(String url, Bitmap image) {
+    private void crop(String url, String name, Bitmap image) {
         LinearLayout layout = new LinearLayout(activity);
         layout.setOrientation(LinearLayout.VERTICAL);
         CropView preview = new CropView(image);
@@ -89,7 +118,7 @@ final class LinkShortcut {
             sheet.dialog.dismiss();
             Bitmap icon = Bitmap.createBitmap(256, 256, Bitmap.Config.ARGB_8888);
             preview.render(new Canvas(icon), 256);
-            pin(url, Icon.createWithBitmap(icon));
+            pin(url, name, Icon.createWithBitmap(icon));
         }));
         sheet.dialog.show();
     }
@@ -127,20 +156,40 @@ final class LinkShortcut {
         }
     }
 
-    private void pin(String url, Icon icon) {
+    private String readName(EditText field) {
+        String label = field.getText().toString().trim();
+        if (!label.isEmpty()) return label;
+        field.setError("กรุณาใส่ชื่อไอคอนทางลัด");
+        field.requestFocus();
+        return null;
+    }
+
+    private String defaultName(String url) {
         String title = activity.getSharedPreferences("browser", Activity.MODE_PRIVATE)
                 .getString("title:" + url, Uri.parse(url).getHost());
-        String id = "url-" + UUID.nameUUIDFromBytes(url.getBytes(StandardCharsets.UTF_8));
+        return title == null || title.trim().isEmpty() ? url : title;
+    }
+
+    private String shortcutId(String url) {
+        return "url-" + UUID.nameUUIDFromBytes(url.getBytes(StandardCharsets.UTF_8));
+    }
+
+    private ShortcutInfo findPinned(ShortcutManager manager, String id) {
+        for (ShortcutInfo pinned : manager.getPinnedShortcuts()) {
+            if (id.equals(pinned.getId())) return pinned;
+        }
+        return null;
+    }
+
+    private void pin(String url, String name, Icon icon) {
+        String id = shortcutId(url);
         Intent launch = new Intent(activity, MainActivity.class).setAction(OPEN).setData(Uri.parse(url))
                 .addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP | Intent.FLAG_ACTIVITY_SINGLE_TOP);
-        ShortcutInfo info = new ShortcutInfo.Builder(activity, id).setShortLabel(
-                title == null || title.trim().isEmpty() ? url : title).setIcon(icon).setIntent(launch).build();
+        ShortcutInfo info = new ShortcutInfo.Builder(activity, id).setShortLabel(name).setIcon(icon).setIntent(launch).build();
         ShortcutManager manager = activity.getSystemService(ShortcutManager.class);
-        for (ShortcutInfo pinned : manager.getPinnedShortcuts()) {
-            if (id.equals(pinned.getId())) {
-                message(manager.updateShortcuts(Collections.singletonList(info)) ? "อัปเดตไอคอนทางลัดแล้ว" : "อัปเดตทางลัดไม่ได้");
-                return;
-            }
+        if (findPinned(manager, id) != null) {
+            message(manager.updateShortcuts(Collections.singletonList(info)) ? "อัปเดตไอคอนทางลัดแล้ว" : "อัปเดตทางลัดไม่ได้");
+            return;
         }
         if (!manager.requestPinShortcut(info, null)) message("เพิ่มทางลัดบนหน้าจอหลักไม่ได้");
     }

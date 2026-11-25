@@ -112,7 +112,10 @@ public class MainActivity extends Activity {
 
         choosingWallpaper = state != null && state.getBoolean("choosingWallpaper");
         shortcuts = new LinkShortcut(this);
-        if (state != null) shortcuts.pendingUrl = state.getString("shortcutPhoto");
+        if (state != null) {
+            shortcuts.pendingUrl = state.getString("shortcutPhoto");
+            shortcuts.pendingName = state.getString("shortcutName");
+        }
         filter = new RequestFilter(settings, getResources());
         account = new GoogleAccountPanel(this, (list, video) -> music.openPlaylist(list, video));
         music = new MusicPanel(this, root, filter, this::updateMusicHeart, account::connectYoutube);
@@ -991,6 +994,7 @@ public class MainActivity extends Activity {
         Bundle webState = new Bundle();
         web.saveState(webState);
         state.putString("shortcutPhoto", shortcuts.pendingUrl);
+        state.putString("shortcutName", shortcuts.pendingName);
         music.save(state);
         state.putBoolean("choosingWallpaper", choosingWallpaper);
         state.putBundle("web", webState);
