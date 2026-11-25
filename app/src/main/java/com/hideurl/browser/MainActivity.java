@@ -271,29 +271,11 @@ public class MainActivity extends Activity {
                 Gravity.BOTTOM | Gravity.LEFT);
         toolbar.leftMargin = dp(6);
         browser.addView(browserBar, toolbar);
-        View cloud = addIcon(browserBar, "cloud", "กลับหน้าหลัก · กดค้างเพื่อจัดการหน้านี้", 48, 0, () -> showPage(false));
-        cloud.setOnLongClickListener(v -> {
-            String url = web.getUrl();
-            if (url == null || !isWebUrl(Uri.parse(url))) return true;
-            String title = web.getTitle();
-            Sheets sheet = new Sheets(this, "หน้านี้");
-            sheet.row(sheet.action("บันทึกหน้านี้", () -> {
-                sheet.dialog.dismiss();
-                bookmark(url, title);
-            }));
-            sheet.row(sheet.action("การป้องกันรายเว็บ", () -> {
-                sheet.dialog.dismiss();
-                filter.panel(this, RequestFilter.host(url), () -> {
-                    filter.configure(web);
-                    music.applyProtection();
-                    web.reload();
-                });
-            }));
-            sheet.dialog.show();
-            return true;
-        });
-
+        View cloud = addIcon(browserBar, "cloud", "เมฆ · แตะเพื่อซ่อนหรือแสดงลูกศร แตะสองครั้งกลับหน้าหลัก กดค้างแล้วลากเพื่อย้าย", 48, 0, this::toggleArrows);
+        cloud.setOnLongClickListener(v -> { showPageMenu(); return true; });
+        bindCloudGestures(cloud);
         arrows = new LinearLayout(this);
+        arrows.setVisibility(settings.getBoolean("showArrows", true) ? View.VISIBLE : View.GONE);
         arrows.setGravity(Gravity.CENTER_VERTICAL);
         arrows.setBackground(rounded(palette.surface, 24));
         LinearLayout.LayoutParams arrowsPlacement = new LinearLayout.LayoutParams(-2, dp(48));
@@ -322,6 +304,102 @@ public class MainActivity extends Activity {
         updateMusicHeart();
     }
 
+    private void toggleArrows() {
+        boolean show = arrows.getVisibility() != View.VISIBLE;
+        arrows.setVisibility(show ? View.VISIBLE : View.GONE);
+        settings.edit().putBoolean("showArrows", show).apply();
+    }
+
+    private void showPageMenu() {
+        String url = web.getUrl();
+        if (url == null || !isWebUrl(Uri.parse(url))) return;
+        String title = web.getTitle();
+        Sheets sheet = new Sheets(this, "หน้านี้");
+        sheet.row(sheet.action("กลับหน้าหลัก", () -> { sheet.dialog.dismiss(); showPage(false); }));
+        sheet.row(sheet.action("บันทึกหน้านี้", () -> {
+            sheet.dialog.dismiss();
+            bookmark(url, title);
+        }));
+        sheet.row(sheet.action("การป้องกันรายเว็บ", () -> {
+            sheet.dialog.dismiss();
+            filter.panel(this, RequestFilter.host(url), () -> {
+                filter.configure(web);
+                music.applyProtection();
+                web.reload();
+            });
+        }));
+        sheet.dialog.show();
+    }
+
+    private void bindCloudGestures(View cloud) {
+        class CloudTouch extends android.view.GestureDetector.SimpleOnGestureListener implements View.OnTouchListener {
+            final android.view.GestureDetector detector = new android.view.GestureDetector(MainActivity.this, this);
+            final int slop = android.view.ViewConfiguration.get(MainActivity.this).getScaledTouchSlop();
+            float fraction = settings.getFloat("browserBarHeight", 0f);
+            float downY, start;
+            boolean held, moved, doubleTap;
+
+            int travel() { return Math.max(0, browser.getHeight() - browserBar.getHeight()); }
+
+            void position() { browserBar.setTranslationY(-fraction * travel()); }
+
+            @Override public boolean onDown(android.view.MotionEvent e) {
+                downY = e.getRawY();
+                start = fraction;
+                held = moved = false;
+                return true;
+            }
+
+            @Override public boolean onSingleTapConfirmed(android.view.MotionEvent e) {
+                cloud.performClick();
+                return true;
+            }
+
+            @Override public boolean onDoubleTap(android.view.MotionEvent e) {
+                doubleTap = true;
+                return true;
+            }
+
+            @Override public void onLongPress(android.view.MotionEvent e) {
+                held = true;
+                cloud.performHapticFeedback(android.view.HapticFeedbackConstants.LONG_PRESS);
+            }
+
+            @Override public boolean onTouch(View v, android.view.MotionEvent e) {
+                int action = e.getActionMasked();
+                if (action == android.view.MotionEvent.ACTION_DOWN) cloud.setPressed(true);
+                detector.onTouchEvent(e);
+                if (action == android.view.MotionEvent.ACTION_MOVE && held && travel() > 0) {
+                    float delta = downY - e.getRawY();
+                    if (Math.abs(delta) > slop) moved = true;
+                    if (moved) {
+                        fraction = Math.max(0f, Math.min(1f, start + delta / travel()));
+                        position();
+                    }
+                }
+                if (action == android.view.MotionEvent.ACTION_UP || action == android.view.MotionEvent.ACTION_CANCEL) {
+                    cloud.setPressed(false);
+                    if (action == android.view.MotionEvent.ACTION_CANCEL) {
+                        if (moved) { fraction = start; position(); }
+                    } else if (moved) {
+                        settings.edit().putFloat("browserBarHeight", fraction).apply();
+                    } else if (held) {
+                        cloud.performLongClick();
+                    } else if (doubleTap) {
+                        TapSound.play(MainActivity.this);
+                        showPage(false);
+                    }
+                    held = moved = doubleTap = false;
+                }
+                return true;
+            }
+        }
+        CloudTouch gestures = new CloudTouch();
+        cloud.setOnTouchListener(gestures);
+        browserBar.addOnLayoutChangeListener((v,l,t,r,b,ol,ot,or,ob) -> gestures.position());
+        browser.addOnLayoutChangeListener((v,l,t,r,b,ol,ot,or,ob) -> gestures.position());
+    }
+
     private void updateMusicHeart() {
         musicHeart.setVisibility(music.enabled() ? View.VISIBLE : View.GONE);
     }
@@ -329,8 +407,7 @@ public class MainActivity extends Activity {
     private void showPage(boolean browsing) {
         if (browsing && browser.getVisibility() != View.VISIBLE && ValueAnimator.areAnimatorsEnabled()) {
             browserBar.setAlpha(0f);
-            browserBar.setTranslationY(dp(14));
-            browserBar.animate().alpha(1f).translationY(0).setDuration(220).start();
+            browserBar.animate().alpha(1f).setDuration(220).start();
         }
         if (browsing) {
             getSystemService(InputMethodManager.class).hideSoftInputFromWindow(urlInput.getWindowToken(), 0);
