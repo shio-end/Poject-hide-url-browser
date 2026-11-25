@@ -639,7 +639,7 @@ public class MainActivity extends Activity {
         settingsLink(sheet, "รูปลักษณ์และเสียง", Appearance.MODES[sheet.theme.mode], this::showAppearance);
         settingsLink(sheet, "การป้องกัน", filter.adsEnabled() ? "AdGuard · เปิด" : "AdGuard · ปิด", this::showProtection);
         settingsLink(sheet, "การอ่านเว็บ", web.getSettings().getTextZoom() + "%", this::showReading);
-        settingsLink(sheet, "ตรวจสอบอัปเดต", "รุ่น " + updates.installedName(), () -> updates.check(true));
+        settingsLink(sheet, "เวอร์ชันและการอัปเดต", updates.installedName(), this::showVersion);
         sheet.dialog.show();
     }
 
@@ -668,6 +668,17 @@ public class MainActivity extends Activity {
         sheet.header.getChildAt(0).setContentDescription("กลับการตั้งค่า");
         sheet.dialog.setOnCancelListener(dialog -> showSettings());
         return sheet;
+    }
+
+    private void showVersion() {
+        Sheets sheet = settingsPage("VEIL " + updates.installedName());
+        sheet.section("มีอะไรใหม่ในรุ่นนี้");
+        sheet.row(sheet.label(getString(R.string.installed_release_notes), 16, false));
+        sheet.row(sheet.action("ตรวจสอบอัปเดต", () -> {
+            sheet.dialog.dismiss();
+            updates.check(true);
+        }));
+        sheet.dialog.show();
     }
 
     private void showProtection() {

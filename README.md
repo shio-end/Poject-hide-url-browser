@@ -8,7 +8,7 @@
 
 Keep the application ID and sign with the same private key used for the published APKs. The SHA-256 fingerprint of the signing certificate is `c0d24cc595b0e55d3e7a807a215668c24737a01aaed49215b141721c7f58156d`. Verify the signed APK with `apksigner verify --print-certs`.
 
-Increase the Gradle version code and version name. Place the signed APK in `downloads/Hide-URL-Browser.apk` and record its version code and name in `downloads/latest.properties`. Publish the commit to main and its matching tag (for example `v0.4.0`) together. The app reads the feed on main and downloads the APK from the version tag.
+Before building, update `versionCode`, `versionName`, and the short Thai `releaseNotes` summary in `downloads/latest.properties` (UTF-8). Gradle bundles this version and summary into the APK. Place the signed APK in `downloads/Hide-URL-Browser.apk`. Publish the commit to main and its matching tag (for example `v0.4.0`) together. The app reads the feed on main and downloads the APK from the version tag.
 
 ## Google sign-in and YouTube playlists
 

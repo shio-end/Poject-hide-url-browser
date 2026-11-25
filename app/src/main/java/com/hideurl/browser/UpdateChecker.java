@@ -132,6 +132,10 @@ final class UpdateChecker {
         }
         if (showStatus) hide();
         Sheets sheet = new Sheets(activity, "มีอัปเดต " + result.name, true);
+        if (!result.notes.isEmpty()) {
+            sheet.section("มีอะไรใหม่ในรุ่นนี้");
+            sheet.row(sheet.label(result.notes, 16, false));
+        }
         sheet.row(sheet.label("ติดตั้งทับรุ่น " + installedName() + " โดยเก็บเว็บที่บันทึกไว้และการตั้งค่า", 16, false));
         sheet.row(sheet.action("อัปเดตในแอป", () -> { sheet.dialog.dismiss(); download(result); }));
         sheet.row(sheet.action("ไว้ภายหลัง", sheet.dialog::dismiss));

@@ -9,20 +9,23 @@ final class PublishedVersion {
     final long code;
     final String name;
 
-    private PublishedVersion(long code, String name) {
+    final String notes;
+
+    private PublishedVersion(long code, String name, String notes) {
         this.code = code;
         this.name = name;
+        this.notes = notes;
     }
 
     static PublishedVersion read(InputStream stream) throws IOException {
         Properties values = new Properties();
-        values.load(stream);
+        values.load(new java.io.InputStreamReader(stream, java.nio.charset.StandardCharsets.UTF_8));
         String name = values.getProperty("versionName", "");
         if (!name.matches("[0-9]+\\.[0-9]+\\.[0-9]+")) throw new IOException("Invalid release name");
         try {
             long code = Long.parseLong(values.getProperty("versionCode", ""));
             if (code < 1) throw new IOException("Invalid version code");
-            return new PublishedVersion(code, name);
+            return new PublishedVersion(code, name, values.getProperty("releaseNotes", "").trim());
         } catch (NumberFormatException error) {
             throw new IOException("Invalid version code", error);
         }

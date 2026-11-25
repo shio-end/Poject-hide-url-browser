@@ -2,6 +2,9 @@ plugins {
     id 'com.android.application' version '8.7.3'
 }
 
+def releaseInfo = new Properties()
+rootProject.file('downloads/latest.properties').withReader('UTF-8') { releaseInfo.load(it) }
+
 android {
     namespace 'com.hideurl.browser'
     compileSdk 34
@@ -12,8 +15,9 @@ android {
         minSdk 31
         targetSdk 34
         resValue 'string', 'google_web_client_id', providers.gradleProperty('VEIL_GOOGLE_WEB_CLIENT_ID').orElse('').get()
-        versionCode 22
-        versionName '0.12.3'
+        versionCode releaseInfo.getProperty('versionCode').toInteger()
+        versionName releaseInfo.getProperty('versionName')
+        resValue 'string', 'installed_release_notes', releaseInfo.getProperty('releaseNotes')
     }
 }
 
