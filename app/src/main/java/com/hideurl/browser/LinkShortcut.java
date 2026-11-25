@@ -1,7 +1,6 @@
 package com.hideurl.browser;
 
 import android.app.Activity;
-import android.app.AlertDialog;
 import android.content.Intent;
 import android.content.pm.ShortcutInfo;
 import android.content.pm.ShortcutManager;
@@ -28,16 +27,20 @@ final class LinkShortcut {
         if (!manager.isRequestPinShortcutSupported()) {
             message("หน้าจอหลักของเครื่องนี้ไม่รองรับการเพิ่มทางลัด"); return;
         }
-        new AlertDialog.Builder(activity, new Appearance(activity).dialogTheme())
-                .setTitle("สร้างทางลัดบนหน้าจอหลัก")
-                .setItems(new String[]{"ใช้ไอคอน VEIL", "เลือกรูปและจัดกรอบ"}, (dialog, index) -> {
-                    if (index == 0) { pin(url, Icon.createWithResource(activity, R.drawable.app_icon)); return; }
-                    Intent picker = new Intent(Intent.ACTION_OPEN_DOCUMENT).setType("image/*")
-                            .addCategory(Intent.CATEGORY_OPENABLE);
-                    pendingUrl = url;
-                    try { activity.startActivityForResult(picker, PHOTO); }
-                    catch (android.content.ActivityNotFoundException e) { pendingUrl = null; message("เปิดตัวเลือกรูปไม่ได้"); }
-                }).show();
+        Sheets sheet = new Sheets(activity, "สร้างทางลัดบนหน้าจอหลัก", true);
+        sheet.row(sheet.action("ใช้ไอคอน VEIL", () -> {
+            sheet.dialog.dismiss();
+            pin(url, Icon.createWithResource(activity, R.drawable.app_icon));
+        }));
+        sheet.row(sheet.action("เลือกรูปและจัดกรอบ", () -> {
+            sheet.dialog.dismiss();
+            Intent picker = new Intent(Intent.ACTION_OPEN_DOCUMENT).setType("image/*")
+                    .addCategory(Intent.CATEGORY_OPENABLE);
+            pendingUrl = url;
+            try { activity.startActivityForResult(picker, PHOTO); }
+            catch (android.content.ActivityNotFoundException e) { pendingUrl = null; message("เปิดตัวเลือกรูปไม่ได้"); }
+        }));
+        sheet.dialog.show();
     }
 
     void photo(Uri uri) {
@@ -79,14 +82,16 @@ final class LinkShortcut {
             public void onStartTrackingTouch(SeekBar bar) {}
             public void onStopTrackingTouch(SeekBar bar) {}
         });
-        new AlertDialog.Builder(activity, new Appearance(activity).dialogTheme())
-                .setTitle("ลากรูปเพื่อจัดกรอบ · เลื่อนแถบเพื่อซูม").setView(layout)
-                .setNegativeButton("ยกเลิก", null)
-                .setPositiveButton("เพิ่มทางลัด", (dialog, which) -> {
-                    Bitmap icon = Bitmap.createBitmap(256, 256, Bitmap.Config.ARGB_8888);
-                    preview.render(new Canvas(icon), 256);
-                    pin(url, Icon.createWithBitmap(icon));
-                }).show();
+        Sheets sheet = new Sheets(activity, "จัดกรอบไอคอน", true);
+        sheet.row(sheet.label("ลากรูปเพื่อจัดตำแหน่ง เลื่อนแถบเพื่อซูม", 15, false));
+        sheet.row(layout);
+        sheet.row(sheet.action("เพิ่มทางลัด", () -> {
+            sheet.dialog.dismiss();
+            Bitmap icon = Bitmap.createBitmap(256, 256, Bitmap.Config.ARGB_8888);
+            preview.render(new Canvas(icon), 256);
+            pin(url, Icon.createWithBitmap(icon));
+        }));
+        sheet.dialog.show();
     }
 
     private final class CropView extends View {

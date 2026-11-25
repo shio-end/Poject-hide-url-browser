@@ -24,19 +24,29 @@ final class Sheets {
     final Appearance theme;
 
     Sheets(Activity activity, String title) {
+        this(activity, title, false);
+    }
+
+    Sheets(Activity activity, String title, boolean centered) {
         this.activity = activity;
         theme = new Appearance(activity);
         dialog = new Dialog(activity, theme.dialogTheme());
         dialog.requestWindowFeature(Window.FEATURE_NO_TITLE);
         LinearLayout card = column();
-        card.setBackground(surface(theme.paper, 24));
+        GradientDrawable glass = new GradientDrawable(GradientDrawable.Orientation.TL_BR, new int[]{
+                (theme.surface & 0xffffff) | 0xee000000,
+                (theme.paper & 0xffffff) | 0xcb000000,
+                (Appearance.tint(theme.surface, theme.accent, .12f) & 0xffffff) | 0xe3000000});
+        glass.setCornerRadius(dp(28));
+        glass.setStroke(dp(1), theme.dark ? 0x66ffffff : 0xc0ffffff);
+        card.setBackground(glass);
         card.setPadding(dp(18), dp(14), dp(18), dp(14));
         View grip = new View(activity);
         LinearLayout.LayoutParams handle = new LinearLayout.LayoutParams(dp(36), dp(4));
         handle.gravity = Gravity.CENTER_HORIZONTAL;
         handle.bottomMargin = dp(12);
         grip.setBackground(surface(theme.line, 2));
-        card.addView(grip, handle);
+        if (!centered) card.addView(grip, handle);
         header = new LinearLayout(activity);
         header.setGravity(Gravity.CENTER_VERTICAL);
         TextView heading = label(title, 23, true);
@@ -49,9 +59,11 @@ final class Sheets {
         card.addView(scroll);
         dialog.setContentView(card);
         Window window = dialog.getWindow();
-        window.setBackgroundDrawable(new ColorDrawable(Color.TRANSPARENT));
-        window.setGravity(Gravity.BOTTOM | Gravity.CENTER_HORIZONTAL);
-        window.setLayout(Math.min(activity.getResources().getDisplayMetrics().widthPixels, dp(520)), -2);
+        window.setBackgroundDrawable(surface(Color.TRANSPARENT, 28));
+        window.setBackgroundBlurRadius(dp(32));
+        window.setDimAmount(.36f);
+        window.setGravity(centered ? Gravity.CENTER : Gravity.BOTTOM | Gravity.CENTER_HORIZONTAL);
+        window.setLayout(Math.min(activity.getResources().getDisplayMetrics().widthPixels - dp(24), dp(centered ? 440 : 520)), -2);
         window.setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE |
                 WindowManager.LayoutParams.SOFT_INPUT_STATE_ALWAYS_HIDDEN);
     }
@@ -91,7 +103,7 @@ final class Sheets {
 
     void clickable(View view, Runnable click) {
         view.setBackground(new RippleDrawable(ColorStateList.valueOf(0x40888888),
-                surface(theme.surface, 14), null));
+                surface((theme.surface & 0xffffff) | 0xbd000000, 16), null));
         view.setStateListAnimator(android.animation.AnimatorInflater.loadStateListAnimator(activity, R.animator.button_press));
         view.setFocusable(true);
         TapSound.bind(view, click);

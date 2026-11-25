@@ -275,7 +275,9 @@ public class MainActivity extends Activity {
         cloud.setOnLongClickListener(v -> { showPageMenu(); return true; });
         bindCloudGestures(cloud);
         arrows = new LinearLayout(this);
-        arrows.setVisibility(settings.getBoolean("showArrows", true) ? View.VISIBLE : View.GONE);
+        arrowsShown = settings.getBoolean("showArrows", true);
+        arrows.setVisibility(arrowsShown ? View.VISIBLE : View.GONE);
+        arrows.setAlpha(arrowsShown ? 1f : 0f);
         arrows.setGravity(Gravity.CENTER_VERTICAL);
         arrows.setBackground(rounded(palette.surface, 24));
         LinearLayout.LayoutParams arrowsPlacement = new LinearLayout.LayoutParams(-2, dp(48));
@@ -304,10 +306,28 @@ public class MainActivity extends Activity {
         updateMusicHeart();
     }
 
-    private void toggleArrows() {
-        boolean show = arrows.getVisibility() != View.VISIBLE;
-        arrows.setVisibility(show ? View.VISIBLE : View.GONE);
+    private boolean arrowsShown;
+
+    private void toggleArrows() { setArrowsShown(!arrowsShown); }
+
+    private void setArrowsShown(boolean show) {
+        arrowsShown = show;
         settings.edit().putBoolean("showArrows", show).apply();
+        arrows.animate().cancel();
+        arrows.setImportantForAccessibility(show ? View.IMPORTANT_FOR_ACCESSIBILITY_AUTO
+                : View.IMPORTANT_FOR_ACCESSIBILITY_NO_HIDE_DESCENDANTS);
+        updateNavigation();
+        float target = show ? 1f : 0f;
+        if (!ValueAnimator.areAnimatorsEnabled()) {
+            arrows.setAlpha(target);
+            arrows.setVisibility(show ? View.VISIBLE : View.GONE);
+            return;
+        }
+        arrows.setVisibility(View.VISIBLE);
+        long duration = Math.max(1, Math.round(420 * Math.abs(target - arrows.getAlpha())));
+        arrows.animate().alpha(target).setStartDelay(0).setDuration(duration)
+                .setInterpolator(new android.view.animation.DecelerateInterpolator())
+                .withEndAction(() -> { if (!arrowsShown) arrows.setVisibility(View.GONE); }).start();
     }
 
     private void showPageMenu() {
@@ -337,7 +357,12 @@ public class MainActivity extends Activity {
             final int slop = android.view.ViewConfiguration.get(MainActivity.this).getScaledTouchSlop();
             float fraction = settings.getFloat("browserBarHeight", 0f);
             float downY, start;
-            boolean held, moved, doubleTap;
+            boolean held, moved, beforeTap;
+            long previousUp = -1;
+            float tapX, tapY;
+            final int tapSlop = android.view.ViewConfiguration.get(MainActivity.this).getScaledDoubleTapSlop();
+
+            CloudTouch() { detector.setOnDoubleTapListener(null); }
 
             int travel() { return Math.max(0, browser.getHeight() - browserBar.getHeight()); }
 
@@ -350,17 +375,28 @@ public class MainActivity extends Activity {
                 return true;
             }
 
-            @Override public boolean onSingleTapConfirmed(android.view.MotionEvent e) {
-                cloud.performClick();
-                return true;
-            }
-
-            @Override public boolean onDoubleTap(android.view.MotionEvent e) {
-                doubleTap = true;
+            @Override public boolean onSingleTapUp(android.view.MotionEvent e) {
+                long gap = e.getDownTime() - previousUp;
+                boolean second = previousUp >= 0 && gap >= 0
+                        && gap <= android.view.ViewConfiguration.getDoubleTapTimeout()
+                        && Math.hypot(e.getRawX() - tapX, e.getRawY() - tapY) <= tapSlop;
+                if (second) {
+                    previousUp = -1;
+                    setArrowsShown(beforeTap);
+                    TapSound.play(MainActivity.this);
+                    showPage(false);
+                } else {
+                    previousUp = e.getEventTime();
+                    tapX = e.getRawX();
+                    tapY = e.getRawY();
+                    beforeTap = arrowsShown;
+                    cloud.performClick();
+                }
                 return true;
             }
 
             @Override public void onLongPress(android.view.MotionEvent e) {
+                previousUp = -1;
                 held = true;
                 cloud.performHapticFeedback(android.view.HapticFeedbackConstants.LONG_PRESS);
             }
@@ -385,11 +421,9 @@ public class MainActivity extends Activity {
                         settings.edit().putFloat("browserBarHeight", fraction).apply();
                     } else if (held) {
                         cloud.performLongClick();
-                    } else if (doubleTap) {
-                        TapSound.play(MainActivity.this);
-                        showPage(false);
+
                     }
-                    held = moved = doubleTap = false;
+                    held = moved = false;
                 }
                 return true;
             }
@@ -440,10 +474,10 @@ public class MainActivity extends Activity {
     }
 
     private void updateNavigation() {
-        back.setEnabled(web.canGoBack());
-        forward.setEnabled(web.canGoForward());
-        back.setAlpha(back.isEnabled() ? 1f : 0.4f);
-        forward.setAlpha(forward.isEnabled() ? 1f : 0.4f);
+        back.setEnabled(arrowsShown && web.canGoBack());
+        forward.setEnabled(arrowsShown && web.canGoForward());
+        back.setAlpha(web.canGoBack() ? 1f : 0.4f);
+        forward.setAlpha(web.canGoForward() ? 1f : 0.4f);
     }
 
     private void openInput() {

@@ -1,7 +1,7 @@
 package com.hideurl.browser;
 
 import android.app.Activity;
-import android.app.AlertDialog;
+import android.app.Dialog;
 import android.content.ActivityNotFoundException;
 import android.graphics.Color;
 import android.provider.Settings;
@@ -40,7 +40,7 @@ final class UpdateChecker {
     private PublishedVersion pendingRelease;
     private boolean manual;
     private boolean visible;
-    private AlertDialog prompt;
+    private Dialog prompt;
 
     UpdateChecker(Activity activity, LinearLayout screen) {
         this.activity = activity;
@@ -131,12 +131,12 @@ final class UpdateChecker {
             return;
         }
         if (showStatus) hide();
-        prompt = new AlertDialog.Builder(activity, new Appearance(activity).dialogTheme())
-                .setTitle("มีอัปเดต " + result.name)
-                .setMessage("ดาวน์โหลดและติดตั้งทับรุ่น " + installedName()
-                        + " โดยเก็บเว็บที่บันทึกไว้และการตั้งค่า")
-                .setNegativeButton("ไว้ภายหลัง", null)
-                .setPositiveButton("อัปเดตในแอป", (dialog, which) -> download(result)).show();
+        Sheets sheet = new Sheets(activity, "มีอัปเดต " + result.name, true);
+        sheet.row(sheet.label("ติดตั้งทับรุ่น " + installedName() + " โดยเก็บเว็บที่บันทึกไว้และการตั้งค่า", 16, false));
+        sheet.row(sheet.action("อัปเดตในแอป", () -> { sheet.dialog.dismiss(); download(result); }));
+        sheet.row(sheet.action("ไว้ภายหลัง", sheet.dialog::dismiss));
+        prompt = sheet.dialog;
+        prompt.show();
     }
 
     private long staged() { return settings.getLong("staged", -1); }
