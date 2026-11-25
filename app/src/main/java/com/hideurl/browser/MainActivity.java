@@ -61,6 +61,7 @@ public class MainActivity extends Activity {
     private static final int THEME_PHOTO_REQUEST = 2;
 
     private UpdateChecker updates;
+    private LinkShortcut shortcuts;
     private MusicPanel music;
     private GoogleAccountPanel account;
     private View musicHeart;
@@ -110,6 +111,8 @@ public class MainActivity extends Activity {
         getWindow().getInsetsController().hide(WindowInsets.Type.systemBars());
 
         choosingWallpaper = state != null && state.getBoolean("choosingWallpaper");
+        shortcuts = new LinkShortcut(this);
+        if (state != null) shortcuts.pendingUrl = state.getString("shortcutPhoto");
         filter = new RequestFilter(settings, getResources());
         account = new GoogleAccountPanel(this, (list, video) -> music.openPlaylist(list, video));
         music = new MusicPanel(this, root, filter, this::updateMusicHeart, account::connectYoutube);
@@ -117,7 +120,9 @@ public class MainActivity extends Activity {
         buildBrowser();
         String latest = settings.getString("latest", "");
         Bundle webState = state == null ? null : state.getBundle("web");
-        if (webState != null && web.restoreState(webState) != null) {
+        String shortcut = state == null ? shortcutUrl(getIntent()) : null;
+        if (shortcut != null) open(shortcut);
+        else if (webState != null && web.restoreState(webState) != null) {
             showPage(state.getBoolean("browsing"));
         } else if (!latest.isEmpty()) {
             open(latest);
@@ -126,6 +131,22 @@ public class MainActivity extends Activity {
         }
         if (state != null) music.restore(state);
         account.welcome(!latest.isEmpty() || settings.contains("saved"));
+    }
+
+    private String shortcutUrl(Intent intent) {
+        Uri uri = intent.getData();
+        return LinkShortcut.OPEN.equals(intent.getAction()) && uri != null && isWebUrl(uri) &&
+                !TextUtils.isEmpty(uri.getHost()) ? uri.toString() : null;
+    }
+
+    @Override protected void onNewIntent(Intent intent) {
+        super.onNewIntent(intent);
+        setIntent(intent);
+        String url = shortcutUrl(intent);
+        if (url != null) {
+            if (music.visible()) music.minimize();
+            open(url);
+        }
     }
 
     private void buildHome() {
@@ -483,6 +504,9 @@ public class MainActivity extends Activity {
                         }).show());
             remove.setContentDescription("ลบ " + link);
             card.addView(remove);
+            TextView more = sheet.action("⋮", () -> shortcuts.menu(link));
+            more.setContentDescription("สร้างทางลัดสำหรับ " + link);
+            card.addView(more, new LinearLayout.LayoutParams(dp(48), dp(48)));
             LinearLayout.LayoutParams gap = new LinearLayout.LayoutParams(-1, -2);
             gap.topMargin = dp(8);
             results.addView(card, gap);
@@ -697,6 +721,10 @@ public class MainActivity extends Activity {
     @Override
     protected void onActivityResult(int request, int result, Intent data) {
         super.onActivityResult(request, result, data);
+        if (request == LinkShortcut.PHOTO) {
+            shortcuts.photo(result == RESULT_OK && data != null ? data.getData() : null);
+            return;
+        }
         if (request == GoogleAccountPanel.CONSENT) { account.result(result, data); return; }
         if (updates.handleResult(request, result)) return;
         if (request == IMPORT_LINKS || request == EXPORT_LINKS) {
@@ -841,7 +869,7 @@ public class MainActivity extends Activity {
         updates.onStop();
         super.onStop();
         // A launcher return may resume this Activity without calling onCreate again.
-        if (!isChangingConfigurations() && !choosingWallpaper && !music.visible() && settings.contains("latest")) {
+        if (!isChangingConfigurations() && !choosingWallpaper && shortcuts.pendingUrl == null && !music.visible() && settings.contains("latest")) {
             showPage(true);
         }
     }
@@ -851,6 +879,7 @@ public class MainActivity extends Activity {
         super.onSaveInstanceState(state);
         Bundle webState = new Bundle();
         web.saveState(webState);
+        state.putString("shortcutPhoto", shortcuts.pendingUrl);
         music.save(state);
         state.putBoolean("choosingWallpaper", choosingWallpaper);
         state.putBundle("web", webState);

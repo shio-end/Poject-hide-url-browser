@@ -158,7 +158,7 @@ final class MusicPanel {
         }
     }
 
-    private void minimize() {
+    void minimize() {
         panel.setVisibility(View.GONE);
         backdrop(false);
     }
