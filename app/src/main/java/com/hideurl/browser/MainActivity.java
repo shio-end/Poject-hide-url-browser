@@ -127,7 +127,7 @@ public class MainActivity extends Activity {
         String latest = settings.getString("latest", "");
         Bundle webState = state == null ? null : state.getBundle("web");
         String shortcut = state == null ? shortcutUrl(getIntent()) : null;
-        if (shortcut != null) open(shortcut);
+        if (shortcut != null) openLink(shortcut);
         else if (webState != null && web.restoreState(webState) != null) {
             showPage(state.getBoolean("browsing"));
         } else if (!latest.isEmpty()) {
@@ -151,7 +151,7 @@ public class MainActivity extends Activity {
         String url = shortcutUrl(intent);
         if (url != null) {
             if (music.visible()) music.minimize();
-            open(url);
+            openLink(url);
         }
     }
 
@@ -250,7 +250,14 @@ public class MainActivity extends Activity {
 
             @Override
             public boolean shouldOverrideUrlLoading(WebView view, WebResourceRequest request) {
-                return !isWebUrl(request.getUrl());
+                Uri next = request.getUrl();
+                if (!isWebUrl(next)) return true;
+                if (request.isForMainFrame() && "http".equalsIgnoreCase(next.getScheme()) && "GET".equals(request.getMethod())) {
+                    if (request.hasGesture()) openLink(next.toString());
+                    else open(next.toString());
+                    return true;
+                }
+                return false;
             }
 
             @Override
@@ -269,7 +276,24 @@ public class MainActivity extends Activity {
 
             @Override
             public void onReceivedError(WebView view, WebResourceRequest request, WebResourceError error) {
-                if (request.isForMainFrame()) updateNavigation();
+                if (!request.isForMainFrame()) return;
+                updateNavigation();
+                Uri failed = request.getUrl();
+                if (error.getErrorCode() == android.webkit.WebViewClient.ERROR_TIMEOUT &&
+                        "GET".equals(request.getMethod()) && isWebUrl(failed) && !isFinishing() && !isDestroyed()
+                        && browser.getVisibility() == View.VISIBLE && !music.visible()) {
+                    Sheets sheet = new Sheets(MainActivity.this, "เชื่อมต่อเว็บหมดเวลา", true);
+                    sheet.row(sheet.label(failed.getEncodedAuthority() + " ไม่ตอบกลับ หากเป็นเว็บภายใน ให้ตรวจว่าเครื่องเชื่อมต่อ Wi-Fi หรือ VPN ของเครือข่ายนั้น", 16, false));
+                    sheet.row(sheet.action("ลองอีกครั้ง", () -> { sheet.dialog.dismiss(); open(failed.toString()); }));
+                    sheet.row(sheet.action("แก้ไขที่อยู่", () -> {
+                        sheet.dialog.dismiss();
+                        showPage(false);
+                        urlInput.setText(failed.toString());
+                        urlInput.setSelection(urlInput.length());
+                        urlInput.requestFocus();
+                    }));
+                    sheet.dialog.show();
+                }
             }
         });
         FrameLayout.LayoutParams viewport = new FrameLayout.LayoutParams(-1, -1);
@@ -492,7 +516,49 @@ public class MainActivity extends Activity {
 
     private void openInput() {
         String url = readInput();
-        if (url != null) open(url);
+        if (url != null) openLink(url);
+    }
+
+    private void openLink(String url) {
+        Uri uri = Uri.parse(url);
+        if (!isWebUrl(uri)) return;
+        if (!"http".equalsIgnoreCase(uri.getScheme())) { open(url); return; }
+        Sheets sheet = new Sheets(this, "ลิงก์นี้ใช้ HTTP", true);
+        sheet.row(sheet.label(uri.getEncodedAuthority() + " ใช้การเชื่อมต่อที่ไม่เข้ารหัส เลือกลอง HTTPS ใน VEIL หรือเปิด HTTP เดิมด้วยเบราว์เซอร์ของเครื่อง", 16, false));
+        sheet.row(sheet.action("ลอง HTTPS ใน VEIL", () -> { sheet.dialog.dismiss(); open(url); }));
+        sheet.row(sheet.action("เปิด HTTP เดิมในเบราว์เซอร์", () -> {
+            sheet.dialog.dismiss();
+            openHttpTab(uri);
+        }));
+        sheet.dialog.show();
+    }
+
+    private void openHttpTab(Uri uri) {
+        android.content.pm.PackageManager pm = getPackageManager();
+        // Match browsers against a neutral address so a site's deep-link app cannot take over.
+        Intent probe = new Intent(Intent.ACTION_VIEW, Uri.parse("http://example.invalid/"))
+                .addCategory(Intent.CATEGORY_BROWSABLE);
+        java.util.ArrayList<String> browsers = new java.util.ArrayList<>();
+        for (android.content.pm.ResolveInfo match : pm.queryIntentActivities(probe, android.content.pm.PackageManager.MATCH_DEFAULT_ONLY)) {
+            browsers.add(match.activityInfo.packageName);
+        }
+        String provider = androidx.browser.customtabs.CustomTabsClient.getPackageName(this, browsers);
+        try {
+            if (provider != null) {
+                androidx.browser.customtabs.CustomTabsIntent tab = new androidx.browser.customtabs.CustomTabsIntent.Builder().setShowTitle(true).build();
+                tab.intent.setPackage(provider);
+                tab.launchUrl(this, uri);
+                return;
+            }
+            if (!browsers.isEmpty()) {
+                android.content.pm.ResolveInfo preferred = pm.resolveActivity(probe, android.content.pm.PackageManager.MATCH_DEFAULT_ONLY);
+                String chosen = preferred != null && browsers.contains(preferred.activityInfo.packageName)
+                        ? preferred.activityInfo.packageName : browsers.get(0);
+                startActivity(probe.setPackage(chosen).setData(uri));
+                return;
+            }
+        } catch (android.content.ActivityNotFoundException ignored) { }
+        Toast.makeText(this, "เปิด HTTP ไม่ได้ กรุณาตรวจว่าเปิดใช้งานเบราว์เซอร์ในเครื่องแล้ว", Toast.LENGTH_LONG).show();
     }
 
     private void open(String url) {
@@ -649,7 +715,7 @@ public class MainActivity extends Activity {
             sheet.clickable(entry, () -> {
                 sheet.dialog.dismiss();
                 urlInput.setText(link);
-                open(link);
+                openLink(link);
             });
             card.addView(entry, new LinearLayout.LayoutParams(0, -2, 1));
             TextView remove = sheet.action("ลบ", () ->
