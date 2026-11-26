@@ -20,6 +20,7 @@ final class WebUpload {
     private WebView owner;
     private boolean multiple;
     private boolean picking;
+    private String document;
 
     WebUpload(Activity activity) { this.activity = activity; }
 
@@ -45,6 +46,7 @@ final class WebUpload {
         picker.putExtra(Intent.EXTRA_ALLOW_MULTIPLE, multiple);
         picking = true;
         owner = view;
+        document = view.getUrl();
         callback = result;
         try { activity.startActivityForResult(picker, PICK); }
         catch (ActivityNotFoundException ex) {
@@ -58,10 +60,12 @@ final class WebUpload {
         picking = false;
         ValueCallback<Uri[]> result = callback;
         callback = null;
+        boolean sameDocument = owner != null && java.util.Objects.equals(document, owner.getUrl());
         owner = null;
+        document = null;
         if (result == null) return;
         LinkedHashSet<Uri> files = new LinkedHashSet<>();
-        if (code == Activity.RESULT_OK && data != null) {
+        if (sameDocument && code == Activity.RESULT_OK && data != null) {
             collect(files, data.getData());
             ClipData clip = data.getClipData();
             if (clip != null) {
@@ -74,10 +78,14 @@ final class WebUpload {
     }
 
     private void collect(LinkedHashSet<Uri> files, Uri uri) {
-        if (uri == null || !"content".equals(uri.getScheme())) return;
+        if (externalDocument(activity, uri)) files.add(uri);
+    }
+
+    static boolean externalDocument(Activity activity, Uri uri) {
+        if (uri == null || !"content".equals(uri.getScheme())) return false;
         String authority = uri.getAuthority();
-        if (authority == null || authority.contains("@") || authority.equals(activity.getPackageName() + ".update")) return;
-        files.add(uri);
+        return authority != null && !authority.isEmpty() && !authority.contains("@")
+                && !authority.equalsIgnoreCase(activity.getPackageName() + ".update");
     }
 
     void detach(WebView view) {

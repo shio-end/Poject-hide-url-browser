@@ -50,7 +50,7 @@ final class BookmarkBackup {
             String url = entry.getString("url");
             Uri uri = Uri.parse(url);
             if (!("http".equalsIgnoreCase(uri.getScheme()) || "https".equalsIgnoreCase(uri.getScheme()))
-                    || uri.getHost()==null || uri.getHost().isEmpty()) throw new JSONException("Invalid URL");
+                    || uri.getUserInfo() != null || uri.getHost()==null || uri.getHost().isEmpty()) throw new JSONException("Invalid URL");
             String title = entry.optString("title", "");
             if (!title.isEmpty() && !prefs.contains("title:" + url)) edit.putString("title:" + url, title);
             urls.add(url);

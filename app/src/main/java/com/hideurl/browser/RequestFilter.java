@@ -35,6 +35,7 @@ final class RequestFilter {
     }
 
     void configure(WebView view) {
+        view.getSettings().setMixedContentMode(android.webkit.WebSettings.MIXED_CONTENT_NEVER_ALLOW);
         musicRules(view).configure(view, adsEnabled(), !paused("music.youtube.com"), !paused("open.spotify.com"));
         boolean blockWindows = settings.getBoolean("blockPopups", true);
         // With multiple windows enabled, WebChromeClient rejects new windows by default.

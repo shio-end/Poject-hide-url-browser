@@ -86,6 +86,7 @@ public class MainActivity extends Activity {
     @Override
     public void onCreate(Bundle state) {
         super.onCreate(state);
+        if (android.os.Build.VERSION.SDK_INT >= 33) setRecentsScreenshotEnabled(false);
         TapSound.prepare(this);
         getSplashScreen().setOnExitAnimationListener(splash -> {
             if (!ValueAnimator.areAnimatorsEnabled()) {
@@ -495,7 +496,9 @@ public class MainActivity extends Activity {
     }
 
     private void open(String url) {
-        if (!isWebUrl(Uri.parse(url))) return;
+        Uri target = Uri.parse(url);
+        if (!isWebUrl(target)) return;
+        if ("http".equalsIgnoreCase(target.getScheme())) url = target.buildUpon().scheme("https").build().toString();
         remember(url);
         showPage(true);
         web.loadUrl(url);
@@ -510,7 +513,7 @@ public class MainActivity extends Activity {
     private static boolean isWebUrl(Uri uri) {
         String scheme = uri.getScheme();
         return ("https".equalsIgnoreCase(scheme) || "http".equalsIgnoreCase(scheme))
-                && uri.getHost() != null && !uri.getHost().isEmpty();
+                && uri.getUserInfo() == null && uri.getHost() != null && !uri.getHost().isEmpty();
     }
 
     private String readInput() {
@@ -555,8 +558,19 @@ public class MainActivity extends Activity {
         Toast.makeText(this, "บันทึก URL แล้ว", Toast.LENGTH_SHORT).show();
     }
 
+    private android.app.Dialog savedListDialog;
+
     private void showSaved() {
+        if (!requireDeviceConfirmation(CONFIRM_SAVED, "เปิดเว็บที่บันทึกไว้")) showSavedList();
+    }
+
+    private void showSavedList() {
         Sheets sheet = new Sheets(this, "เว็บที่บันทึกไว้");
+        savedListDialog = sheet.dialog;
+        sheet.dialog.setOnDismissListener(ignored -> {
+            if (savedListDialog == sheet.dialog) savedListDialog = null;
+        });
+        sheet.dialog.getWindow().addFlags(android.view.WindowManager.LayoutParams.FLAG_SECURE);
         EditText search = new EditText(this);
         search.setSingleLine();
         search.setHint("ค้นหาชื่อเว็บหรือ URL");
@@ -571,11 +585,8 @@ public class MainActivity extends Activity {
         for (int request : new int[]{EXPORT_LINKS, IMPORT_LINKS}) {
             transfer.addView(sheet.action(request == EXPORT_LINKS ? "ส่งออก" : "นำเข้า", () -> {
                 sheet.dialog.dismiss();
-                Intent picker = new Intent(request == EXPORT_LINKS ? Intent.ACTION_CREATE_DOCUMENT : Intent.ACTION_OPEN_DOCUMENT);
-                picker.addCategory(Intent.CATEGORY_OPENABLE);
-                picker.setType(request == EXPORT_LINKS ? "application/json" : "*/*");
-                if (request == EXPORT_LINKS) picker.putExtra(Intent.EXTRA_TITLE, "VEIL-bookmarks.json");
-                startActivityForResult(picker, request);
+                if (request == EXPORT_LINKS) confirmExport();
+                else pickBookmarkFile(request);
             }), new LinearLayout.LayoutParams(0, -2, 1));
         }
         sheet.row(transfer);
@@ -588,6 +599,34 @@ public class MainActivity extends Activity {
         });
         renderSaved(sheet, search, results);
         sheet.dialog.show();
+    }
+
+    private static final int CONFIRM_EXPORT = 494, CONFIRM_SAVED = 495;
+
+    // If a screen lock is configured, only a successful system result may continue.
+    private boolean requireDeviceConfirmation(int request, String action) {
+        android.app.KeyguardManager lock = getSystemService(android.app.KeyguardManager.class);
+        if (!lock.isDeviceSecure()) return false;
+        Intent verify = lock.createConfirmDeviceCredentialIntent(action, "ยืนยันตัวตนด้วยระบบล็อกหน้าจอของเครื่อง");
+        if (verify != null) startActivityForResult(verify, request);
+        else Toast.makeText(this, "ยืนยันตัวตนไม่ได้", Toast.LENGTH_SHORT).show();
+        return true;
+    }
+
+    private void confirmExport() {
+        if (requireDeviceConfirmation(CONFIRM_EXPORT, "ส่งออกเว็บที่บันทึกไว้")) return;
+        Sheets prompt = new Sheets(this, "ส่งออกเว็บที่บันทึกไว้", true);
+        prompt.row(prompt.label("เครื่องนี้ไม่ได้ตั้งรหัสล็อกหน้าจอ ผู้ที่เปิดไฟล์ JSON จะอ่านลิงก์ได้", 16, false));
+        prompt.row(prompt.action("ส่งออกไฟล์", () -> { prompt.dialog.dismiss(); pickBookmarkFile(EXPORT_LINKS); }));
+        prompt.dialog.show();
+    }
+
+    private void pickBookmarkFile(int request) {
+        Intent picker = new Intent(request == EXPORT_LINKS ? Intent.ACTION_CREATE_DOCUMENT : Intent.ACTION_OPEN_DOCUMENT);
+        picker.addCategory(Intent.CATEGORY_OPENABLE);
+        picker.setType(request == EXPORT_LINKS ? "application/json" : "*/*");
+        if (request == EXPORT_LINKS) picker.putExtra(Intent.EXTRA_TITLE, "VEIL-bookmarks.json");
+        startActivityForResult(picker, request);
     }
 
     private void renderSaved(Sheets sheet, EditText search, LinearLayout results) {
@@ -852,6 +891,14 @@ public class MainActivity extends Activity {
     @Override
     protected void onActivityResult(int request, int result, Intent data) {
         super.onActivityResult(request, result, data);
+        if (request == CONFIRM_SAVED) {
+            if (result == RESULT_OK) showSavedList();
+            return;
+        }
+        if (request == CONFIRM_EXPORT) {
+            if (result == RESULT_OK) pickBookmarkFile(EXPORT_LINKS);
+            return;
+        }
         if (request == WebUpload.PICK) { uploads.finish(result, data); return; }
         if (request == LinkShortcut.PHOTO) {
             shortcuts.photo(result == RESULT_OK && data != null ? data.getData() : null);
@@ -860,7 +907,7 @@ public class MainActivity extends Activity {
         if (request == GoogleAccountPanel.CONSENT) { account.result(result, data); return; }
         if (updates.handleResult(request, result)) return;
         if (request == IMPORT_LINKS || request == EXPORT_LINKS) {
-            if (result == RESULT_OK && data != null && data.getData() != null) transferBookmarks(request, data.getData());
+            if (result == RESULT_OK && data != null && WebUpload.externalDocument(this, data.getData())) transferBookmarks(request, data.getData());
             return;
         }
         if (request != WALLPAPER_REQUEST && request != THEME_PHOTO_REQUEST) return;
@@ -997,6 +1044,7 @@ public class MainActivity extends Activity {
 
     @Override
     protected void onStop() {
+        if (savedListDialog != null) savedListDialog.dismiss();
         reading.flush();
         updates.onStop();
         super.onStop();
