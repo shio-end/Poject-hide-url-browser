@@ -15,18 +15,12 @@ import java.util.Collections;
 
 final class RequestFilter {
     private final SharedPreferences settings;
-    private final boolean strict;
 
     private final Resources resources;
     private HostList adDomains;
     private HostList trackingDomains;
 
     RequestFilter(SharedPreferences settings, Resources resources) {
-        this(settings, resources, false);
-    }
-
-    RequestFilter(SharedPreferences settings, Resources resources, boolean strict) {
-        this.strict = strict;
         this.settings = settings;
         this.resources = resources;
     }
@@ -41,7 +35,6 @@ final class RequestFilter {
     }
 
     void configure(WebView view) {
-        view.getSettings().setMixedContentMode(android.webkit.WebSettings.MIXED_CONTENT_NEVER_ALLOW);
         musicRules(view).configure(view, adsEnabled(), !paused("music.youtube.com"), !paused("open.spotify.com"));
         boolean blockWindows = settings.getBoolean("blockPopups", true);
         // With multiple windows enabled, WebChromeClient rejects new windows by default.
@@ -61,7 +54,7 @@ final class RequestFilter {
     }
 
     boolean adsEnabled() {
-        return strict || settings.getBoolean("blockAds", true);
+        return settings.getBoolean("blockAds", true);
     }
 
     void stylePage(WebView view) {
@@ -82,7 +75,7 @@ final class RequestFilter {
         return name == null ? "" : name.toLowerCase(java.util.Locale.ROOT);
     }
 
-    boolean paused(String host) { return !strict && settings.getBoolean("pause:" + host, false); }
+    boolean paused(String host) { return settings.getBoolean("pause:" + host, false); }
 
     void panel(android.app.Activity activity, String host, Runnable refresh) {
         if (host.isEmpty()) return;
@@ -102,15 +95,10 @@ final class RequestFilter {
     }
 
     class Client extends WebViewClient {
-        private final String allowedHttpOrigin;
-
-        Client() { this(null); }
-        Client(String allowedHttpOrigin) { this.allowedHttpOrigin = allowedHttpOrigin; }
-
         private volatile String pageHost = "";
         @Override
         public WebResourceResponse shouldInterceptRequest(WebView view, WebResourceRequest request) {
-            return intercept(request, allowedHttpOrigin, request.isForMainFrame() ? host(request.getUrl().toString()) : pageHost);
+            return intercept(request, request.isForMainFrame() ? host(request.getUrl().toString()) : pageHost);
         }
 
         @Override
@@ -136,20 +124,15 @@ final class RequestFilter {
     WebResourceResponse intercept(WebResourceRequest request) {
         String source = request.getRequestHeaders().get("Referer");
         if (source == null) source = request.getRequestHeaders().get("Origin");
-        return intercept(request, null, host(source));
+        return intercept(request, host(source));
     }
 
-    private WebResourceResponse intercept(WebResourceRequest request, String allowedHttpOrigin, String site) {
-        String scheme = request.getUrl().getScheme();
-        if (!HttpOrigin.permits(allowedHttpOrigin, scheme, request.getUrl().toString(), request.isForMainFrame())) {
-            return new WebResourceResponse("text/plain", "UTF-8", 403, "Blocked",
-                    Collections.singletonMap("Cache-Control", "no-store"), new ByteArrayInputStream(new byte[0]));
-        }
+    private WebResourceResponse intercept(WebResourceRequest request, String site) {
         if (paused(site)) return null;
         Uri uri = request.getUrl();
         String host = uri.getHost();
         boolean ads = adsEnabled();
-        boolean trackers = strict || settings.getBoolean("blockTrackers", true);
+        boolean trackers = settings.getBoolean("blockTrackers", true);
         boolean blocked = DomainFilter.blocks(host, ads, trackers)
                 || (ads && domains(true).matches(host))
                 || (trackers && domains(false).matches(host));

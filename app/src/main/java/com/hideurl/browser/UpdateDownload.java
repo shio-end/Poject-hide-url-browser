@@ -15,8 +15,6 @@ import java.util.function.IntConsumer;
 import javax.net.ssl.HttpsURLConnection;
 
 final class UpdateDownload {
-    private static final long MAX_APK_BYTES = 128L * 1024 * 1024;
-
     static void fetch(Context context, PublishedVersion version, IntConsumer progress) throws IOException {
         try {
             fetch(context, version, progress, version.apkUrl());
@@ -36,7 +34,6 @@ final class UpdateDownload {
             connection.setReadTimeout(15000);
             if (connection.getResponseCode() != 200) throw new IOException("Download failed");
             long size = connection.getContentLengthLong();
-            if (size > MAX_APK_BYTES) throw new IOException("Update too large");
             long total = 0;
             int last = -1;
             try (InputStream in = connection.getInputStream(); FileOutputStream out = new FileOutputStream(temp)) {
@@ -44,7 +41,6 @@ final class UpdateDownload {
                 int count;
                 while ((count = in.read(buffer)) != -1) {
                     if (Thread.currentThread().isInterrupted()) throw new IOException("Interrupted");
-                    if (total + count > MAX_APK_BYTES) throw new IOException("Update too large");
                     out.write(buffer, 0, count);
                     total += count;
                     if (size > 0) {

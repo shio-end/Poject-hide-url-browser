@@ -62,8 +62,6 @@ public class MainActivity extends Activity {
 
     private UpdateChecker updates;
     private WebUpload uploads;
-    private static final int HTTP_TAB = 494;
-    private boolean routeReady, viewingHttp;
     private LinkShortcut shortcuts;
     private MusicPanel music;
     private GoogleAccountPanel account;
@@ -88,7 +86,6 @@ public class MainActivity extends Activity {
     @Override
     public void onCreate(Bundle state) {
         super.onCreate(state);
-        if (android.os.Build.VERSION.SDK_INT >= 33) setRecentsScreenshotEnabled(false);
         TapSound.prepare(this);
         getSplashScreen().setOnExitAnimationListener(splash -> {
             if (!ValueAnimator.areAnimatorsEnabled()) {
@@ -126,41 +123,14 @@ public class MainActivity extends Activity {
         music = new MusicPanel(this, root, filter, uploads, this::updateMusicHeart, account::connectYoutube);
         buildHome();
         buildBrowser();
-        viewingHttp = state != null && state.getBoolean("viewingHttp");
-        root.setVisibility(View.INVISIBLE);
-        startBrowsing(state);
-    }
-
-    private void startBrowsing(Bundle state) {
-        WebRoutes.secure(this, success -> {
-            if (isFinishing() || isDestroyed()) return;
-            if (!success) {
-                Sheets failure = new Sheets(this, "เปิดเบราว์เซอร์ไม่ได้", true);
-                failure.row(failure.label("ตั้งค่าการป้องกันการเชื่อมต่อไม่ได้ กรุณาตรวจสอบ Android System WebView แล้วลองอีกครั้ง", 16, false));
-                failure.row(failure.action("ลองอีกครั้ง", () -> {
-                    failure.dialog.setOnDismissListener(null);
-                    failure.dialog.dismiss();
-                    startBrowsing(state);
-                }));
-                failure.dialog.setOnDismissListener(d -> finish());
-                failure.dialog.show();
-                return;
-            }
-            routeReady = true;
-            root.setVisibility(View.VISIBLE);
-            restorePage(state);
-        });
-    }
-
-    private void restorePage(Bundle state) {
         String latest = settings.getString("latest", "");
         Bundle webState = state == null ? null : state.getBundle("web");
         String shortcut = state == null ? shortcutUrl(getIntent()) : null;
-        if (shortcut != null) openLink(shortcut);
+        if (shortcut != null) open(shortcut);
         else if (webState != null && web.restoreState(webState) != null) {
             showPage(state.getBoolean("browsing"));
-        } else if (!latest.isEmpty() && !viewingHttp) {
-            openLink(latest);
+        } else if (!latest.isEmpty()) {
+            open(latest);
         } else {
             showPage(false);
         }
@@ -177,11 +147,10 @@ public class MainActivity extends Activity {
     @Override protected void onNewIntent(Intent intent) {
         super.onNewIntent(intent);
         setIntent(intent);
-        if (!routeReady) return;
         String url = shortcutUrl(intent);
         if (url != null) {
             if (music.visible()) music.minimize();
-            openLink(url);
+            open(url);
         }
     }
 
@@ -280,13 +249,7 @@ public class MainActivity extends Activity {
 
             @Override
             public boolean shouldOverrideUrlLoading(WebView view, WebResourceRequest request) {
-                Uri next = request.getUrl();
-                if (!isWebUrl(next)) return true;
-                if ("http".equalsIgnoreCase(next.getScheme())) {
-                    if (request.isForMainFrame() && "GET".equals(request.getMethod())) openLink(next.toString());
-                    return true;
-                }
-                return false;
+                return !isWebUrl(request.getUrl());
             }
 
             @Override
@@ -305,24 +268,7 @@ public class MainActivity extends Activity {
 
             @Override
             public void onReceivedError(WebView view, WebResourceRequest request, WebResourceError error) {
-                if (!request.isForMainFrame()) return;
-                updateNavigation();
-                Uri failed = request.getUrl();
-                if (error.getErrorCode() == android.webkit.WebViewClient.ERROR_TIMEOUT &&
-                        "GET".equals(request.getMethod()) && isWebUrl(failed) && !isFinishing() && !isDestroyed()
-                        && browser.getVisibility() == View.VISIBLE && !music.visible()) {
-                    Sheets sheet = new Sheets(MainActivity.this, "เชื่อมต่อเว็บหมดเวลา", true);
-                    sheet.row(sheet.label(failed.getEncodedAuthority() + " ไม่ตอบกลับ หากเป็นเว็บภายใน ให้ตรวจว่าเครื่องเชื่อมต่อ Wi-Fi หรือ VPN ของเครือข่ายนั้น", 16, false));
-                    sheet.row(sheet.action("ลองอีกครั้ง", () -> { sheet.dialog.dismiss(); openLink(failed.toString()); }));
-                    sheet.row(sheet.action("แก้ไขที่อยู่", () -> {
-                        sheet.dialog.dismiss();
-                        showPage(false);
-                        urlInput.setText(failed.toString());
-                        urlInput.setSelection(urlInput.length());
-                        urlInput.requestFocus();
-                    }));
-                    sheet.dialog.show();
-                }
+                if (request.isForMainFrame()) updateNavigation();
             }
         });
         FrameLayout.LayoutParams viewport = new FrameLayout.LayoutParams(-1, -1);
@@ -545,38 +491,18 @@ public class MainActivity extends Activity {
 
     private void openInput() {
         String url = readInput();
-        if (url != null) openLink(url);
-    }
-
-    private void openLink(String url) {
-        Uri uri = Uri.parse(url);
-        if (!isWebUrl(uri)) return;
-        if (!"http".equalsIgnoreCase(uri.getScheme())) { open(url); return; }
-        if (HttpOrigin.of(url) == null) {
-            Toast.makeText(this, "ที่อยู่ HTTP หรือพอร์ตไม่ถูกต้อง", Toast.LENGTH_LONG).show();
-            return;
-        }
-        viewingHttp = true;
-        Intent tab = new Intent(this, HttpTab.class).setData(uri);
-        tab.putExtra("history", new android.os.ResultReceiver(new android.os.Handler(getMainLooper())) {
-            @Override protected void onReceiveResult(int code, Bundle data) {
-                String page = data.getString("page");
-                if (HttpOrigin.of(page) != null) settings.edit().putString("latest", page).apply();
-            }
-        });
-        startActivityForResult(tab, HTTP_TAB);
+        if (url != null) open(url);
     }
 
     private void open(String url) {
-        Uri target = Uri.parse(url);
-        if (!isWebUrl(target) || !"https".equalsIgnoreCase(target.getScheme())) return;
+        if (!isWebUrl(Uri.parse(url))) return;
         remember(url);
         showPage(true);
         web.loadUrl(url);
     }
 
     private void remember(String url) {
-        if (url != null && isWebUrl(Uri.parse(url)) && "https".equalsIgnoreCase(Uri.parse(url).getScheme())) {
+        if (url != null && isWebUrl(Uri.parse(url))) {
             settings.edit().putString("latest", url).apply();
         }
     }
@@ -584,7 +510,7 @@ public class MainActivity extends Activity {
     private static boolean isWebUrl(Uri uri) {
         String scheme = uri.getScheme();
         return ("https".equalsIgnoreCase(scheme) || "http".equalsIgnoreCase(scheme))
-                && uri.getUserInfo() == null && uri.getHost() != null && !uri.getHost().isEmpty();
+                && uri.getHost() != null && !uri.getHost().isEmpty();
     }
 
     private String readInput() {
@@ -629,19 +555,8 @@ public class MainActivity extends Activity {
         Toast.makeText(this, "บันทึก URL แล้ว", Toast.LENGTH_SHORT).show();
     }
 
-    private android.app.Dialog savedListDialog;
-
     private void showSaved() {
-        if (!requireDeviceConfirmation(CONFIRM_SAVED, "เปิดเว็บที่บันทึกไว้")) showSavedList();
-    }
-
-    private void showSavedList() {
         Sheets sheet = new Sheets(this, "เว็บที่บันทึกไว้");
-        savedListDialog = sheet.dialog;
-        sheet.dialog.setOnDismissListener(ignored -> {
-            if (savedListDialog == sheet.dialog) savedListDialog = null;
-        });
-        sheet.dialog.getWindow().addFlags(android.view.WindowManager.LayoutParams.FLAG_SECURE);
         EditText search = new EditText(this);
         search.setSingleLine();
         search.setHint("ค้นหาชื่อเว็บหรือ URL");
@@ -656,8 +571,11 @@ public class MainActivity extends Activity {
         for (int request : new int[]{EXPORT_LINKS, IMPORT_LINKS}) {
             transfer.addView(sheet.action(request == EXPORT_LINKS ? "ส่งออก" : "นำเข้า", () -> {
                 sheet.dialog.dismiss();
-                if (request == EXPORT_LINKS) confirmExport();
-                else pickBookmarkFile(request);
+                Intent picker = new Intent(request == EXPORT_LINKS ? Intent.ACTION_CREATE_DOCUMENT : Intent.ACTION_OPEN_DOCUMENT);
+                picker.addCategory(Intent.CATEGORY_OPENABLE);
+                picker.setType(request == EXPORT_LINKS ? "application/json" : "*/*");
+                if (request == EXPORT_LINKS) picker.putExtra(Intent.EXTRA_TITLE, "VEIL-bookmarks.json");
+                startActivityForResult(picker, request);
             }), new LinearLayout.LayoutParams(0, -2, 1));
         }
         sheet.row(transfer);
@@ -670,34 +588,6 @@ public class MainActivity extends Activity {
         });
         renderSaved(sheet, search, results);
         sheet.dialog.show();
-    }
-
-    private static final int CONFIRM_EXPORT = 494, CONFIRM_SAVED = 495;
-
-    // If a screen lock is configured, only a successful system result may continue.
-    private boolean requireDeviceConfirmation(int request, String action) {
-        android.app.KeyguardManager lock = getSystemService(android.app.KeyguardManager.class);
-        if (!lock.isDeviceSecure()) return false;
-        Intent verify = lock.createConfirmDeviceCredentialIntent(action, "ยืนยันตัวตนด้วยระบบล็อกหน้าจอของเครื่อง");
-        if (verify != null) startActivityForResult(verify, request);
-        else Toast.makeText(this, "ยืนยันตัวตนไม่ได้", Toast.LENGTH_SHORT).show();
-        return true;
-    }
-
-    private void confirmExport() {
-        if (requireDeviceConfirmation(CONFIRM_EXPORT, "ส่งออกเว็บที่บันทึกไว้")) return;
-        Sheets prompt = new Sheets(this, "ส่งออกเว็บที่บันทึกไว้", true);
-        prompt.row(prompt.label("เครื่องนี้ไม่ได้ตั้งรหัสล็อกหน้าจอ ผู้ที่เปิดไฟล์ JSON จะอ่านลิงก์ได้", 16, false));
-        prompt.row(prompt.action("ส่งออกไฟล์", () -> { prompt.dialog.dismiss(); pickBookmarkFile(EXPORT_LINKS); }));
-        prompt.dialog.show();
-    }
-
-    private void pickBookmarkFile(int request) {
-        Intent picker = new Intent(request == EXPORT_LINKS ? Intent.ACTION_CREATE_DOCUMENT : Intent.ACTION_OPEN_DOCUMENT);
-        picker.addCategory(Intent.CATEGORY_OPENABLE);
-        picker.setType(request == EXPORT_LINKS ? "application/json" : "*/*");
-        if (request == EXPORT_LINKS) picker.putExtra(Intent.EXTRA_TITLE, "VEIL-bookmarks.json");
-        startActivityForResult(picker, request);
     }
 
     private void renderSaved(Sheets sheet, EditText search, LinearLayout results) {
@@ -720,7 +610,7 @@ public class MainActivity extends Activity {
             sheet.clickable(entry, () -> {
                 sheet.dialog.dismiss();
                 urlInput.setText(link);
-                openLink(link);
+                open(link);
             });
             card.addView(entry, new LinearLayout.LayoutParams(0, -2, 1));
             TextView remove = sheet.action("ลบ", () ->
@@ -962,22 +852,6 @@ public class MainActivity extends Activity {
     @Override
     protected void onActivityResult(int request, int result, Intent data) {
         super.onActivityResult(request, result, data);
-        if (request == HTTP_TAB) {
-            viewingHttp = false;
-            if (result == RESULT_OK && data != null && data.getData() != null) {
-                String target = data.getDataString();
-                WebRoutes.secure(this, ok -> { if (ok && !isFinishing() && !isDestroyed()) openLink(target); });
-            }
-            return;
-        }
-        if (request == CONFIRM_SAVED) {
-            if (result == RESULT_OK) showSavedList();
-            return;
-        }
-        if (request == CONFIRM_EXPORT) {
-            if (result == RESULT_OK) pickBookmarkFile(EXPORT_LINKS);
-            return;
-        }
         if (request == WebUpload.PICK) { uploads.finish(result, data); return; }
         if (request == LinkShortcut.PHOTO) {
             shortcuts.photo(result == RESULT_OK && data != null ? data.getData() : null);
@@ -986,7 +860,7 @@ public class MainActivity extends Activity {
         if (request == GoogleAccountPanel.CONSENT) { account.result(result, data); return; }
         if (updates.handleResult(request, result)) return;
         if (request == IMPORT_LINKS || request == EXPORT_LINKS) {
-            if (result == RESULT_OK && data != null && WebUpload.externalDocument(this, data.getData())) transferBookmarks(request, data.getData());
+            if (result == RESULT_OK && data != null && data.getData() != null) transferBookmarks(request, data.getData());
             return;
         }
         if (request != WALLPAPER_REQUEST && request != THEME_PHOTO_REQUEST) return;
@@ -1123,12 +997,11 @@ public class MainActivity extends Activity {
 
     @Override
     protected void onStop() {
-        if (savedListDialog != null) savedListDialog.dismiss();
         reading.flush();
         updates.onStop();
         super.onStop();
         // A launcher return may resume this Activity without calling onCreate again.
-        if (!viewingHttp && !isChangingConfigurations() && !choosingWallpaper && shortcuts.pendingUrl == null && !music.visible() && web.getUrl() != null && settings.contains("latest")) {
+        if (!isChangingConfigurations() && !choosingWallpaper && shortcuts.pendingUrl == null && !music.visible() && settings.contains("latest")) {
             showPage(true);
         }
     }
@@ -1138,7 +1011,6 @@ public class MainActivity extends Activity {
         super.onSaveInstanceState(state);
         Bundle webState = new Bundle();
         web.saveState(webState);
-        state.putBoolean("viewingHttp", viewingHttp);
         state.putString("shortcutPhoto", shortcuts.pendingUrl);
         state.putString("shortcutName", shortcuts.pendingName);
         music.save(state);
