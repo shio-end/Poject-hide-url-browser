@@ -62,6 +62,8 @@ public class MainActivity extends Activity {
 
     private UpdateChecker updates;
     private WebUpload uploads;
+    private static final int HTTP_TAB = 494;
+    private boolean routeReady, viewingHttp;
     private LinkShortcut shortcuts;
     private MusicPanel music;
     private GoogleAccountPanel account;
@@ -124,14 +126,41 @@ public class MainActivity extends Activity {
         music = new MusicPanel(this, root, filter, uploads, this::updateMusicHeart, account::connectYoutube);
         buildHome();
         buildBrowser();
+        viewingHttp = state != null && state.getBoolean("viewingHttp");
+        root.setVisibility(View.INVISIBLE);
+        startBrowsing(state);
+    }
+
+    private void startBrowsing(Bundle state) {
+        WebRoutes.secure(this, success -> {
+            if (isFinishing() || isDestroyed()) return;
+            if (!success) {
+                Sheets failure = new Sheets(this, "เปิดเบราว์เซอร์ไม่ได้", true);
+                failure.row(failure.label("ตั้งค่าการป้องกันการเชื่อมต่อไม่ได้ กรุณาตรวจสอบ Android System WebView แล้วลองอีกครั้ง", 16, false));
+                failure.row(failure.action("ลองอีกครั้ง", () -> {
+                    failure.dialog.setOnDismissListener(null);
+                    failure.dialog.dismiss();
+                    startBrowsing(state);
+                }));
+                failure.dialog.setOnDismissListener(d -> finish());
+                failure.dialog.show();
+                return;
+            }
+            routeReady = true;
+            root.setVisibility(View.VISIBLE);
+            restorePage(state);
+        });
+    }
+
+    private void restorePage(Bundle state) {
         String latest = settings.getString("latest", "");
         Bundle webState = state == null ? null : state.getBundle("web");
         String shortcut = state == null ? shortcutUrl(getIntent()) : null;
         if (shortcut != null) openLink(shortcut);
         else if (webState != null && web.restoreState(webState) != null) {
             showPage(state.getBoolean("browsing"));
-        } else if (!latest.isEmpty()) {
-            open(latest);
+        } else if (!latest.isEmpty() && !viewingHttp) {
+            openLink(latest);
         } else {
             showPage(false);
         }
@@ -148,6 +177,7 @@ public class MainActivity extends Activity {
     @Override protected void onNewIntent(Intent intent) {
         super.onNewIntent(intent);
         setIntent(intent);
+        if (!routeReady) return;
         String url = shortcutUrl(intent);
         if (url != null) {
             if (music.visible()) music.minimize();
@@ -252,9 +282,8 @@ public class MainActivity extends Activity {
             public boolean shouldOverrideUrlLoading(WebView view, WebResourceRequest request) {
                 Uri next = request.getUrl();
                 if (!isWebUrl(next)) return true;
-                if (request.isForMainFrame() && "http".equalsIgnoreCase(next.getScheme()) && "GET".equals(request.getMethod())) {
-                    if (request.hasGesture()) openLink(next.toString());
-                    else open(next.toString());
+                if ("http".equalsIgnoreCase(next.getScheme())) {
+                    if (request.isForMainFrame() && "GET".equals(request.getMethod())) openLink(next.toString());
                     return true;
                 }
                 return false;
@@ -284,7 +313,7 @@ public class MainActivity extends Activity {
                         && browser.getVisibility() == View.VISIBLE && !music.visible()) {
                     Sheets sheet = new Sheets(MainActivity.this, "เชื่อมต่อเว็บหมดเวลา", true);
                     sheet.row(sheet.label(failed.getEncodedAuthority() + " ไม่ตอบกลับ หากเป็นเว็บภายใน ให้ตรวจว่าเครื่องเชื่อมต่อ Wi-Fi หรือ VPN ของเครือข่ายนั้น", 16, false));
-                    sheet.row(sheet.action("ลองอีกครั้ง", () -> { sheet.dialog.dismiss(); open(failed.toString()); }));
+                    sheet.row(sheet.action("ลองอีกครั้ง", () -> { sheet.dialog.dismiss(); openLink(failed.toString()); }));
                     sheet.row(sheet.action("แก้ไขที่อยู่", () -> {
                         sheet.dialog.dismiss();
                         showPage(false);
@@ -523,55 +552,31 @@ public class MainActivity extends Activity {
         Uri uri = Uri.parse(url);
         if (!isWebUrl(uri)) return;
         if (!"http".equalsIgnoreCase(uri.getScheme())) { open(url); return; }
-        Sheets sheet = new Sheets(this, "ลิงก์นี้ใช้ HTTP", true);
-        sheet.row(sheet.label(uri.getEncodedAuthority() + " ใช้การเชื่อมต่อที่ไม่เข้ารหัส เลือกลอง HTTPS ใน VEIL หรือเปิด HTTP เดิมด้วยเบราว์เซอร์ของเครื่อง", 16, false));
-        sheet.row(sheet.action("ลอง HTTPS ใน VEIL", () -> { sheet.dialog.dismiss(); open(url); }));
-        sheet.row(sheet.action("เปิด HTTP เดิมในเบราว์เซอร์", () -> {
-            sheet.dialog.dismiss();
-            openHttpTab(uri);
-        }));
-        sheet.dialog.show();
-    }
-
-    private void openHttpTab(Uri uri) {
-        android.content.pm.PackageManager pm = getPackageManager();
-        // Match browsers against a neutral address so a site's deep-link app cannot take over.
-        Intent probe = new Intent(Intent.ACTION_VIEW, Uri.parse("http://example.invalid/"))
-                .addCategory(Intent.CATEGORY_BROWSABLE);
-        java.util.ArrayList<String> browsers = new java.util.ArrayList<>();
-        for (android.content.pm.ResolveInfo match : pm.queryIntentActivities(probe, android.content.pm.PackageManager.MATCH_DEFAULT_ONLY)) {
-            browsers.add(match.activityInfo.packageName);
+        if (HttpOrigin.of(url) == null) {
+            Toast.makeText(this, "ที่อยู่ HTTP หรือพอร์ตไม่ถูกต้อง", Toast.LENGTH_LONG).show();
+            return;
         }
-        String provider = androidx.browser.customtabs.CustomTabsClient.getPackageName(this, browsers);
-        try {
-            if (provider != null) {
-                androidx.browser.customtabs.CustomTabsIntent tab = new androidx.browser.customtabs.CustomTabsIntent.Builder().setShowTitle(true).build();
-                tab.intent.setPackage(provider);
-                tab.launchUrl(this, uri);
-                return;
+        viewingHttp = true;
+        Intent tab = new Intent(this, HttpTab.class).setData(uri);
+        tab.putExtra("history", new android.os.ResultReceiver(new android.os.Handler(getMainLooper())) {
+            @Override protected void onReceiveResult(int code, Bundle data) {
+                String page = data.getString("page");
+                if (HttpOrigin.of(page) != null) settings.edit().putString("latest", page).apply();
             }
-            if (!browsers.isEmpty()) {
-                android.content.pm.ResolveInfo preferred = pm.resolveActivity(probe, android.content.pm.PackageManager.MATCH_DEFAULT_ONLY);
-                String chosen = preferred != null && browsers.contains(preferred.activityInfo.packageName)
-                        ? preferred.activityInfo.packageName : browsers.get(0);
-                startActivity(probe.setPackage(chosen).setData(uri));
-                return;
-            }
-        } catch (android.content.ActivityNotFoundException ignored) { }
-        Toast.makeText(this, "เปิด HTTP ไม่ได้ กรุณาตรวจว่าเปิดใช้งานเบราว์เซอร์ในเครื่องแล้ว", Toast.LENGTH_LONG).show();
+        });
+        startActivityForResult(tab, HTTP_TAB);
     }
 
     private void open(String url) {
         Uri target = Uri.parse(url);
-        if (!isWebUrl(target)) return;
-        if ("http".equalsIgnoreCase(target.getScheme())) url = target.buildUpon().scheme("https").build().toString();
+        if (!isWebUrl(target) || !"https".equalsIgnoreCase(target.getScheme())) return;
         remember(url);
         showPage(true);
         web.loadUrl(url);
     }
 
     private void remember(String url) {
-        if (url != null && isWebUrl(Uri.parse(url))) {
+        if (url != null && isWebUrl(Uri.parse(url)) && "https".equalsIgnoreCase(Uri.parse(url).getScheme())) {
             settings.edit().putString("latest", url).apply();
         }
     }
@@ -957,6 +962,14 @@ public class MainActivity extends Activity {
     @Override
     protected void onActivityResult(int request, int result, Intent data) {
         super.onActivityResult(request, result, data);
+        if (request == HTTP_TAB) {
+            viewingHttp = false;
+            if (result == RESULT_OK && data != null && data.getData() != null) {
+                String target = data.getDataString();
+                WebRoutes.secure(this, ok -> { if (ok && !isFinishing() && !isDestroyed()) openLink(target); });
+            }
+            return;
+        }
         if (request == CONFIRM_SAVED) {
             if (result == RESULT_OK) showSavedList();
             return;
@@ -1115,7 +1128,7 @@ public class MainActivity extends Activity {
         updates.onStop();
         super.onStop();
         // A launcher return may resume this Activity without calling onCreate again.
-        if (!isChangingConfigurations() && !choosingWallpaper && shortcuts.pendingUrl == null && !music.visible() && settings.contains("latest")) {
+        if (!viewingHttp && !isChangingConfigurations() && !choosingWallpaper && shortcuts.pendingUrl == null && !music.visible() && web.getUrl() != null && settings.contains("latest")) {
             showPage(true);
         }
     }
@@ -1125,6 +1138,7 @@ public class MainActivity extends Activity {
         super.onSaveInstanceState(state);
         Bundle webState = new Bundle();
         web.saveState(webState);
+        state.putBoolean("viewingHttp", viewingHttp);
         state.putString("shortcutPhoto", shortcuts.pendingUrl);
         state.putString("shortcutName", shortcuts.pendingName);
         music.save(state);
