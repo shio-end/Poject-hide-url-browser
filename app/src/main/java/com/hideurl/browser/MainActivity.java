@@ -61,6 +61,7 @@ public class MainActivity extends Activity {
     private static final int THEME_PHOTO_REQUEST = 2;
 
     private UpdateChecker updates;
+    private WebUpload uploads;
     private LinkShortcut shortcuts;
     private MusicPanel music;
     private GoogleAccountPanel account;
@@ -111,6 +112,7 @@ public class MainActivity extends Activity {
         getWindow().getInsetsController().hide(WindowInsets.Type.systemBars());
 
         choosingWallpaper = state != null && state.getBoolean("choosingWallpaper");
+        uploads = new WebUpload(this);
         shortcuts = new LinkShortcut(this);
         if (state != null) {
             shortcuts.pendingUrl = state.getString("shortcutPhoto");
@@ -118,7 +120,7 @@ public class MainActivity extends Activity {
         }
         filter = new RequestFilter(settings, getResources());
         account = new GoogleAccountPanel(this, (list, video) -> music.openPlaylist(list, video));
-        music = new MusicPanel(this, root, filter, this::updateMusicHeart, account::connectYoutube);
+        music = new MusicPanel(this, root, filter, uploads, this::updateMusicHeart, account::connectYoutube);
         buildHome();
         buildBrowser();
         String latest = settings.getString("latest", "");
@@ -231,7 +233,11 @@ public class MainActivity extends Activity {
         web.getSettings().setAllowContentAccess(false);
         applyZoom();
         filter.configure(web);
-        web.setWebChromeClient(new android.webkit.WebChromeClient());
+        web.setWebChromeClient(new android.webkit.WebChromeClient() {
+            @Override public boolean onShowFileChooser(WebView view, android.webkit.ValueCallback<Uri[]> callback, FileChooserParams params) {
+                return uploads.choose(view, callback, params);
+            }
+        });
         ServiceWorkerController.getInstance().setServiceWorkerClient(new WorkerFilter(filter));
         web.setWebViewClient(filter.new Client() {
 
@@ -846,6 +852,7 @@ public class MainActivity extends Activity {
     @Override
     protected void onActivityResult(int request, int result, Intent data) {
         super.onActivityResult(request, result, data);
+        if (request == WebUpload.PICK) { uploads.finish(result, data); return; }
         if (request == LinkShortcut.PHOTO) {
             shortcuts.photo(result == RESULT_OK && data != null ? data.getData() : null);
             return;
@@ -1029,6 +1036,7 @@ public class MainActivity extends Activity {
         reading.close();
         updates.close();
         browser.removeView(web);
+        uploads.detach(web);
         web.destroy();
         super.onDestroy();
     }

@@ -32,6 +32,7 @@ final class MusicPanel {
         Uri homepage() { return Uri.parse("https://" + host + "/"); }
     }
 
+    private final WebUpload uploads;
     private final Activity activity;
     private final FrameLayout root;
     private final RequestFilter filter;
@@ -46,11 +47,12 @@ final class MusicPanel {
     private AlertDialog mediaPrompt;
     private PermissionRequest pendingMedia;
 
-    MusicPanel(Activity activity, FrameLayout root, RequestFilter filter, Runnable selectionChanged, Runnable connectYoutube) {
+    MusicPanel(Activity activity, FrameLayout root, RequestFilter filter, WebUpload uploads, Runnable selectionChanged, Runnable connectYoutube) {
         this.connectYoutube = connectYoutube;
         this.activity = activity;
         this.root = root;
         this.filter = filter;
+        this.uploads = uploads;
         this.selectionChanged = selectionChanged;
     }
 
@@ -215,6 +217,10 @@ final class MusicPanel {
         player.getSettings().setAllowContentAccess(false);
         filter.configure(player);
         player.setWebChromeClient(new WebChromeClient() {
+            @Override public boolean onShowFileChooser(WebView view, android.webkit.ValueCallback<Uri[]> callback, FileChooserParams params) {
+                return uploads.choose(view, callback, params);
+            }
+
             @Override
             public void onPermissionRequest(PermissionRequest request) {
                 Uri origin = request.getOrigin();
@@ -343,6 +349,7 @@ final class MusicPanel {
         card.removeView(player);
         previewHeart = null;
         card = null;
+        uploads.detach(player);
         player.destroy();
         player = null;
         panel = null;
